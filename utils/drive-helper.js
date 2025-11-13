@@ -1,0 +1,112 @@
+const { getDrive } = require('./google-auth');
+const fs = require('fs');
+const path = require('path');
+
+async function findOrCreateFolder(parentFolderId, folderName) {
+  const drive = await getDrive();
+
+  // Search for existing folder
+  const query = `name='${folderName}' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+
+  const searchResponse = await drive.files.list({
+    q: query,
+    fields: 'files(id, name)',
+    spaces: 'drive',
+  });
+
+  if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+    return searchResponse.data.files[0].id;
+  }
+
+  // Create new folder
+  const fileMetadata = {
+    name: folderName,
+    mimeType: 'application/vnd.google-apps.folder',
+    parents: [parentFolderId],
+  };
+
+  const folder = await drive.files.create({
+    resource: fileMetadata,
+    fields: 'id',
+  });
+
+  return folder.data.id;
+}
+
+async function uploadFile(filePath, fileName, folderId, mimeType = 'video/webm') {
+  const drive = await getDrive();
+
+  const fileMetadata = {
+    name: fileName,
+    parents: [folderId],
+  };
+
+  const media = {
+    mimeType: mimeType,
+    body: fs.createReadStream(filePath),
+  };
+
+  const file = await drive.files.create({
+    resource: fileMetadata,
+    media: media,
+    fields: 'id, name, webViewLink',
+  });
+
+  return {
+    fileId: file.data.id,
+    fileName: file.data.name,
+    webViewLink: file.data.webViewLink,
+  };
+}
+
+async function uploadBuffer(buffer, fileName, folderId, mimeType = 'video/webm') {
+  const drive = await getDrive();
+  const { Readable } = require('stream');
+
+  const fileMetadata = {
+    name: fileName,
+    parents: [folderId],
+  };
+
+  const bufferStream = new Readable();
+  bufferStream.push(buffer);
+  bufferStream.push(null);
+
+  const media = {
+    mimeType: mimeType,
+    body: bufferStream,
+  };
+
+  const file = await drive.files.create({
+    resource: fileMetadata,
+    media: media,
+    fields: 'id, name, webViewLink',
+  });
+
+  return {
+    fileId: file.data.id,
+    fileName: file.data.name,
+    webViewLink: file.data.webViewLink,
+  };
+}
+
+async function listRecordings(folderId) {
+  const drive = await getDrive();
+
+  const query = `'${folderId}' in parents and trashed=false`;
+
+  const response = await drive.files.list({
+    q: query,
+    fields: 'files(id, name, createdTime, webViewLink, mimeType)',
+    orderBy: 'createdTime desc',
+  });
+
+  return response.data.files || [];
+}
+
+module.exports = {
+  findOrCreateFolder,
+  uploadFile,
+  uploadBuffer,
+  listRecordings,
+};

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CIA - Consecutive Interpreting Assessment</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="container">
+
+    <!-- Page 1: Login -->
+    <div id="page1" class="page active">
+      <h1>Consecutive Interpreting Assessment</h1>
+      <p>Welcome to the CIA assessment. Please enter your credentials to begin.</p>
+
+      <div id="loginError" class="error-message" style="display: none;"></div>
+
+      <form id="loginForm">
+        <div class="form-group">
+          <label for="email">Email Address</label>
+          <input type="email" id="email" name="email" required placeholder="your.email@example.com">
+        </div>
+
+        <div class="form-group">
+          <label for="studentId">Student ID</label>
+          <input type="text" id="studentId" name="studentId" required placeholder="12345">
+        </div>
+
+        <button type="submit" id="loginBtn">Continue</button>
+      </form>
+    </div>
+
+    <!-- Page 2: Instructions -->
+    <div id="page2" class="page">
+      <h1>Test Instructions</h1>
+
+      <div id="testInfo" class="success-message"></div>
+
+      <h2>Important Guidelines:</h2>
+      <ul style="margin-left: 20px; margin-bottom: 20px; color: #555; line-height: 1.8;">
+        <li>You will need TWO devices for this test (e.g., computer + phone)</li>
+        <li>Your main device will display the test and record your interpretation</li>
+        <li>Your second device (proctoring device) will provide an additional camera angle</li>
+        <li>Both cameras must be active throughout the entire test</li>
+        <li>You will interpret from English into your target language</li>
+        <li>Maximum test duration: 35 minutes</li>
+        <li>You may request up to 5 interventions without penalty</li>
+        <li>Maximum 10 interventions allowed per test</li>
+        <li>All recordings are automatically uploaded to prevent data loss</li>
+      </ul>
+
+      <h2>Intervention Types:</h2>
+      <ul style="margin-left: 20px; margin-bottom: 20px; color: #555; line-height: 1.8;">
+        <li><strong>Request Repetition:</strong> Ask the speaker to repeat the last segment</li>
+        <li><strong>Request Research Pause:</strong> Take up to 90 seconds to look up terminology</li>
+      </ul>
+
+      <button onclick="showPage('page3')">I Understand - Continue</button>
+    </div>
+
+    <!-- Page 3: Proctor Setup -->
+    <div id="page3" class="page">
+      <h1>Set Up Proctoring Device</h1>
+      <p>Please use your second device to join as a proctor. Use EITHER the QR code OR the PIN below.</p>
+
+      <div class="qr-container">
+        <h2>Scan this QR Code:</h2>
+        <canvas id="qrcode"></canvas>
+      </div>
+
+      <div class="pin-display">
+        <h2>Or enter this PIN on your proctor device:</h2>
+        <div class="pin-code" id="pinDisplay">------</div>
+        <p style="margin-top: 10px; color: #666;">Visit: <strong id="proctorUrl">Loading...</strong></p>
+      </div>
+
+      <div id="waitingStatus" class="status-waiting">
+        Waiting for proctor device to connect...
+      </div>
+
+      <div id="readyStatus" class="status-ready" style="display: none;">
+        ✓ Proctor device connected! You may proceed.
+      </div>
+
+      <button id="proceedBtn" onclick="showPage('page4')" disabled>Continue to Camera Setup</button>
+    </div>
+
+    <!-- Page 4: Camera/Mic Permissions -->
+    <div id="page4" class="page">
+      <h1>Camera & Microphone Setup</h1>
+      <p>We need access to your camera and microphone for this assessment.</p>
+
+      <div id="permissionError" class="error-message" style="display: none;"></div>
+
+      <div class="video-preview" style="max-width: 640px; margin: 20px auto;">
+        <video id="previewVideo" autoplay muted playsinline></video>
+        <div class="video-label">Your Camera</div>
+      </div>
+
+      <div style="text-align: center; margin: 20px 0;">
+        <p id="micStatus" style="color: #666;">Microphone: <span id="micLevel">Checking...</span></p>
+      </div>
+
+      <div style="text-align: center;">
+        <button id="requestPermissionsBtn" onclick="requestPermissions()">Grant Permissions</button>
+        <button onclick="showPage('page5')" id="continueToTestBtn" disabled>Continue to Test</button>
+      </div>
+    </div>
+
+    <!-- Page 5: Test Interface -->
+    <div id="page5" class="page">
+      <h1>Consecutive Interpreting Assessment</h1>
+
+      <div class="segment-info">
+        <span id="segmentInfo">Segment 1 of X</span>
+      </div>
+
+      <div class="video-container">
+        <div class="video-preview">
+          <video id="mainVideo" autoplay muted playsinline></video>
+          <div class="video-label">Main Camera</div>
+          <div class="recording-indicator" id="mainRecording">● REC</div>
+        </div>
+
+        <div class="video-preview">
+          <video id="proctorVideo" autoplay muted playsinline></video>
+          <div class="video-label">Proctor Camera</div>
+          <div class="recording-indicator" id="proctorRecording">● REC</div>
+        </div>
+      </div>
+
+      <audio id="audioPlayer" class="audio-player"></audio>
+
+      <div class="timer-display" id="timerDisplay">00:00</div>
+
+      <div class="test-controls">
+        <button id="interventionBtn" onclick="startIntervention()">🎤 Request Intervention</button>
+        <button id="continueBtn" onclick="continueToNext()" style="display: none;">Continue</button>
+      </div>
+
+      <div class="intervention-counter">
+        <p>Interventions Used: <span id="interventionCount">0</span>/10</p>
+        <p id="interventionWarning" style="display: none;"></p>
+      </div>
+    </div>
+
+    <!-- Page 6: Test Complete -->
+    <div id="page6" class="page">
+      <h1>Assessment Complete</h1>
+      <div class="success-message">
+        <p>✓ Your assessment has been completed and uploaded successfully.</p>
+      </div>
+
+      <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h2>Summary:</h2>
+        <p><strong>Student ID:</strong> <span id="summaryStudentId"></span></p>
+        <p><strong>Test:</strong> <span id="summaryTest"></span></p>
+        <p><strong>Duration:</strong> <span id="summaryDuration"></span></p>
+        <p><strong>Interventions:</strong> <span id="summaryInterventions"></span></p>
+      </div>
+
+      <p>Your recordings are being processed and will be reviewed by an instructor. You may now close this window.</p>
+    </div>
+
+  </div>
+
+  <!-- Intervention Modal -->
+  <div id="interventionModal" class="intervention-modal">
+    <div class="intervention-content">
+      <div id="interventionStep1">
+        <h2>🔴 Recording Intervention</h2>
+        <p>State your intervention protocol clearly in both languages.</p>
+        <div class="loading-spinner"></div>
+        <p id="interventionTimer" style="margin-top: 20px; font-size: 18px; color: #666;">15 seconds</p>
+        <button onclick="finishIntervention()">Finish Speaking</button>
+      </div>
+
+      <div id="interventionStep2" style="display: none;">
+        <h2>What do you need?</h2>
+        <div class="intervention-actions">
+          <button onclick="selectInterventionAction('repeat')">
+            🔁 Repeat Last Segment
+            <br><small>(Repetitions: <span id="repeatCount">5</span> remaining)</small>
+          </button>
+          <button onclick="selectInterventionAction('research')">
+            📚 Pause to Research
+            <br><small>(90 seconds to look up terminology)</small>
+          </button>
+          <button onclick="selectInterventionAction('continue')">
+            ▶️ Continue
+            <br><small>(Already handled)</small>
+          </button>
+        </div>
+      </div>
+
+      <div id="interventionStep3" style="display: none;">
+        <h2>⏸️ Research Pause Active</h2>
+        <div class="timer-display" id="researchTimer">01:30</div>
+        <p>Look up your terminology now.</p>
+        <button onclick="endResearchPause()">Ready to Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <script src="/js/app.js"></script>
+  <script src="/js/recording.js"></script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CIA - Proctor Device</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="container">
+
+    <!-- Proctor Login -->
+    <div id="proctorLogin" class="page active">
+      <h1>Proctor Device</h1>
+      <p>Enter the session ID and PIN from your main device.</p>
+
+      <div id="proctorError" class="error-message" style="display: none;"></div>
+
+      <form id="proctorLoginForm">
+        <div class="form-group">
+          <label for="sessionId">Session ID</label>
+          <input type="text" id="sessionId" name="sessionId" required placeholder="Enter session ID">
+        </div>
+
+        <div class="form-group">
+          <label for="pin">PIN</label>
+          <input type="text" id="pin" name="pin" required placeholder="Enter 6-digit PIN" maxlength="6">
+        </div>
+
+        <button type="submit">Connect as Proctor</button>
+      </form>
+    </div>
+
+    <!-- Proctor Camera View -->
+    <div id="proctorView" class="page">
+      <h1>Proctoring Active</h1>
+
+      <div class="success-message">
+        <p><strong>Student:</strong> <span id="proctorStudentInfo"></span></p>
+        <p>Keep this device positioned to provide a clear view of the test-taker throughout the assessment.</p>
+      </div>
+
+      <div class="video-preview" style="max-width: 100%; margin: 20px 0;">
+        <video id="proctorCameraView" autoplay muted playsinline></video>
+        <div class="video-label">Proctor View</div>
+        <div class="recording-indicator active">● REC</div>
+      </div>
+
+      <div style="text-align: center; color: #4caf50; font-size: 18px; font-weight: 600;">
+        ✓ Connected and Recording
+      </div>
+
+      <p style="text-align: center; margin-top: 20px; color: #666;">
+        Do not close this window until the test is complete.
+      </p>
+    </div>
+
+    <!-- Proctor Complete -->
+    <div id="proctorComplete" class="page">
+      <h1>Proctoring Complete</h1>
+      <div class="success-message">
+        <p>✓ The assessment has been completed. Your proctor recording has been uploaded.</p>
+      </div>
+      <p style="text-align: center;">You may now close this window.</p>
+    </div>
+
+  </div>
+
+  <script src="/js/proctor.js"></script>
+</body>
+</html>

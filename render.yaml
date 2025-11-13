@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: cia-assessment
+    env: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: GOOGLE_CLIENT_EMAIL
+        sync: false
+      - key: GOOGLE_PRIVATE_KEY
+        sync: false
+      - key: GOOGLE_DRIVE_FOLDER_ID
+        sync: false
+      - key: GOOGLE_SHEET_ID
+        sync: false
+      - key: STUDENTS_SHEET_RANGE
+        value: Students!A:D
+      - key: ADMIN_SHEET_RANGE
+        value: Admins!A:A

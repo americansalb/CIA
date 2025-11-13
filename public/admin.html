@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CIA - Admin Panel</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    body {
+      background: #f5f5f5;
+      padding: 0;
+      display: block;
+    }
+
+    .admin-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .admin-header {
+      background: white;
+      padding: 20px 30px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .recordings-grid {
+      display: grid;
+      gap: 20px;
+    }
+
+    .recording-card {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .recording-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 15px;
+      padding-bottom: 15px;
+      border-bottom: 2px solid #f0f0f0;
+    }
+
+    .recording-meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 15px;
+    }
+
+    .meta-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .meta-label {
+      font-size: 12px;
+      color: #888;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .meta-value {
+      font-size: 16px;
+      color: #333;
+      font-weight: 500;
+    }
+
+    .status-badge {
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 600;
+      display: inline-block;
+    }
+
+    .status-pending {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .status-graded {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .video-links {
+      display: flex;
+      gap: 10px;
+      margin: 15px 0;
+    }
+
+    .video-link {
+      padding: 10px 20px;
+      background: #667eea;
+      color: white;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 500;
+      transition: transform 0.2s;
+    }
+
+    .video-link:hover {
+      transform: translateY(-2px);
+    }
+
+    .grading-section {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 2px solid #f0f0f0;
+    }
+
+    .grade-form {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    select, textarea {
+      padding: 10px;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    select:focus, textarea:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    textarea {
+      min-height: 80px;
+      resize: vertical;
+    }
+
+    .intervention-list {
+      background: #f9f9f9;
+      padding: 15px;
+      border-radius: 6px;
+      margin: 10px 0;
+    }
+
+    .intervention-item {
+      padding: 8px 0;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .intervention-item:last-child {
+      border-bottom: none;
+    }
+
+    .filter-bar {
+      background: white;
+      padding: 15px 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .filter-bar select {
+      padding: 8px 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="admin-container">
+
+    <!-- Login Page -->
+    <div id="adminLogin" class="page active">
+      <div class="container" style="max-width: 500px; margin: 100px auto;">
+        <h1>Admin Login</h1>
+        <p>Enter your authorized email to access the admin panel.</p>
+
+        <div id="adminLoginError" class="error-message" style="display: none;"></div>
+
+        <form id="adminLoginForm">
+          <div class="form-group">
+            <label for="adminEmail">Admin Email</label>
+            <input type="email" id="adminEmail" required placeholder="admin@example.com">
+          </div>
+          <button type="submit">Login</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Admin Dashboard -->
+    <div id="adminDashboard" class="page">
+      <div class="admin-header">
+        <h1>CIA Assessment - Admin Panel</h1>
+        <p style="color: #666; margin-top: 10px;">Logged in as: <strong id="adminEmailDisplay"></strong></p>
+      </div>
+
+      <div class="filter-bar">
+        <label>Filter by status:</label>
+        <select id="statusFilter" onchange="filterRecordings()">
+          <option value="all">All Recordings</option>
+          <option value="pending_review">Pending Review</option>
+          <option value="graded">Graded</option>
+        </select>
+
+        <label style="margin-left: auto;">Sort by:</label>
+        <select id="sortFilter" onchange="filterRecordings()">
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+        </select>
+      </div>
+
+      <div id="recordingsContainer">
+        <div class="loading-spinner"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>
