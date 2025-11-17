@@ -10,6 +10,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // API Routes
+app.get('/api/health', require('./api/health'));
 app.post('/api/validate-student', require('./api/validate-student'));
 app.post('/api/validate-admin', require('./api/validate-admin'));
 app.post('/api/upload-chunk', require('./api/upload-chunk'));

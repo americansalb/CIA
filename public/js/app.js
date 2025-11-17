@@ -321,15 +321,23 @@ function loadSegment(index) {
   const audioPlayer = document.getElementById('audioPlayer');
   audioPlayer.src = testConfig.segments[index];
 
+  // Update segment info
   document.getElementById('segmentInfo').textContent =
     `Segment ${index + 1} of ${testConfig.segments.length}`;
+
+  // Update progress bar
+  const progress = ((index + 1) / testConfig.segments.length) * 100;
+  document.getElementById('segmentProgressBar').style.width = `${progress}%`;
 
   // Auto-play the segment
   audioPlayer.play();
 
   // When audio ends, show continue button
   audioPlayer.onended = () => {
-    document.getElementById('continueBtn').style.display = 'inline-block';
+    const continueBtn = document.getElementById('continueBtn');
+    continueBtn.style.display = 'inline-flex';
+    continueBtn.classList.add('btn-pulse');
+    setTimeout(() => continueBtn.classList.remove('btn-pulse'), 1000);
   };
 }
 
@@ -398,6 +406,10 @@ async function selectInterventionAction(action) {
   if (action === 'repeat') {
     if (repetitionCount > 0) {
       repetitionCount--;
+      // Update repetitions display
+      document.getElementById('repetitionsRemaining').textContent = repetitionCount;
+      document.getElementById('repeatCount').textContent = repetitionCount;
+
       // Replay current segment
       const audioPlayer = document.getElementById('audioPlayer');
       audioPlayer.currentTime = 0;

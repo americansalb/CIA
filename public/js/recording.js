@@ -1,3 +1,150 @@
+// IndexedDB Helper for local backup storage
+class RecordingBackup {
+  constructor() {
+    this.dbName = 'CIA_RecordingBackup';
+    this.version = 1;
+    this.db = null;
+  }
+
+  async init() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, this.version);
+
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        this.db = request.result;
+        resolve();
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+
+        // Create stores if they don't exist
+        if (!db.objectStoreNames.contains('chunks')) {
+          const chunkStore = db.createObjectStore('chunks', { keyPath: 'id', autoIncrement: true });
+          chunkStore.createIndex('sessionId', 'sessionId', { unique: false });
+          chunkStore.createIndex('uploaded', 'uploaded', { unique: false });
+        }
+
+        if (!db.objectStoreNames.contains('metadata')) {
+          db.createObjectStore('metadata', { keyPath: 'sessionId' });
+        }
+      };
+    });
+  }
+
+  async saveChunk(sessionId, deviceType, chunkNumber, blob, uploaded = false) {
+    const transaction = this.db.transaction(['chunks'], 'readwrite');
+    const store = transaction.objectStore('chunks');
+
+    const chunkData = {
+      sessionId,
+      deviceType,
+      chunkNumber,
+      blob,
+      uploaded,
+      timestamp: Date.now(),
+    };
+
+    return new Promise((resolve, reject) => {
+      const request = store.add(chunkData);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async markChunkUploaded(chunkId) {
+    const transaction = this.db.transaction(['chunks'], 'readwrite');
+    const store = transaction.objectStore('chunks');
+
+    return new Promise((resolve, reject) => {
+      const getRequest = store.get(chunkId);
+      getRequest.onsuccess = () => {
+        const chunk = getRequest.result;
+        if (chunk) {
+          chunk.uploaded = true;
+          const updateRequest = store.put(chunk);
+          updateRequest.onsuccess = () => resolve();
+          updateRequest.onerror = () => reject(updateRequest.error);
+        } else {
+          resolve();
+        }
+      };
+      getRequest.onerror = () => reject(getRequest.error);
+    });
+  }
+
+  async getUnuploadedChunks(sessionId) {
+    const transaction = this.db.transaction(['chunks'], 'readonly');
+    const store = transaction.objectStore('chunks');
+    const index = store.index('sessionId');
+
+    return new Promise((resolve, reject) => {
+      const request = index.getAll(sessionId);
+      request.onsuccess = () => {
+        const chunks = request.result.filter(chunk => !chunk.uploaded);
+        resolve(chunks);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async saveMetadata(sessionId, data) {
+    const transaction = this.db.transaction(['metadata'], 'readwrite');
+    const store = transaction.objectStore('metadata');
+
+    const metadata = {
+      sessionId,
+      ...data,
+      lastUpdated: Date.now(),
+    };
+
+    return new Promise((resolve, reject) => {
+      const request = store.put(metadata);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getMetadata(sessionId) {
+    const transaction = this.db.transaction(['metadata'], 'readonly');
+    const store = transaction.objectStore('metadata');
+
+    return new Promise((resolve, reject) => {
+      const request = store.get(sessionId);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async clearSession(sessionId) {
+    const transaction = this.db.transaction(['chunks', 'metadata'], 'readwrite');
+    const chunkStore = transaction.objectStore('chunks');
+    const metadataStore = transaction.objectStore('metadata');
+
+    const index = chunkStore.index('sessionId');
+    const range = IDBKeyRange.only(sessionId);
+
+    return new Promise((resolve, reject) => {
+      const deleteChunks = index.openCursor(range);
+      deleteChunks.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          cursor.delete();
+          cursor.continue();
+        }
+      };
+
+      metadataStore.delete(sessionId);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+}
+
+// Global backup instance
+const recordingBackup = new RecordingBackup();
+
 // Recording manager for main and proctor devices
 class RecordingManager {
   constructor(deviceType, sessionId) {
@@ -11,11 +158,20 @@ class RecordingManager {
     this.isRecording = false;
     this.chunkInterval = null;
     this.startTime = null;
+    this.uploadQueue = [];
+    this.isUploading = false;
+    this.heartbeatInterval = null;
+    this.connectionHealthy = true;
+    this.retryAttempts = new Map(); // Track retry attempts per chunk
+    this.uploadedChunkIds = new Set(); // Track successfully uploaded chunks
   }
 
   async startRecording(stream) {
     this.stream = stream;
     this.startTime = Date.now();
+
+    // Initialize IndexedDB
+    await recordingBackup.init();
 
     try {
       // Use low video quality, good audio quality
@@ -49,17 +205,61 @@ class RecordingManager {
       this.mediaRecorder.start(1000);
       this.isRecording = true;
 
-      // Set up 60-second upload interval
+      // Set up 30-second upload interval (reduced from 60s for more frequent backups)
       this.chunkInterval = setInterval(() => {
         if (this.isRecording) {
           this.stopAndUploadChunk();
         }
-      }, 60000); // 60 seconds
+      }, 30000); // 30 seconds
 
-      console.log(`[${this.deviceType}] Recording started`);
+      // Set up connection heartbeat (every 10 seconds)
+      this.heartbeatInterval = setInterval(() => {
+        this.checkConnection();
+      }, 10000);
+
+      // Save initial metadata
+      await recordingBackup.saveMetadata(this.sessionId, {
+        deviceType: this.deviceType,
+        startTime: this.startTime,
+        lastChunkNumber: 0,
+      });
+
+      console.log(`[${this.deviceType}] Recording started with enhanced reliability`);
+      this.showNotification('Recording started', 'success');
     } catch (error) {
       console.error(`[${this.deviceType}] Failed to start recording:`, error);
+      this.showNotification('Failed to start recording', 'error');
       throw error;
+    }
+  }
+
+  async checkConnection() {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+
+      const response = await fetch('/api/health', {
+        method: 'GET',
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (response.ok) {
+        if (!this.connectionHealthy) {
+          this.connectionHealthy = true;
+          this.showNotification('Connection restored', 'success');
+          // Retry any failed uploads
+          await this.retryFailedUploads();
+        }
+      } else {
+        this.connectionHealthy = false;
+      }
+    } catch (error) {
+      if (this.connectionHealthy) {
+        this.connectionHealthy = false;
+        this.showNotification('Connection issue detected - data being saved locally', 'warning');
+      }
     }
   }
 
@@ -83,38 +283,139 @@ class RecordingManager {
     this.chunks = []; // Clear chunks after creating blob
     this.chunkNumber++;
 
+    // Save to IndexedDB immediately
+    const chunkId = await recordingBackup.saveChunk(
+      this.sessionId,
+      this.deviceType,
+      this.chunkNumber,
+      blob,
+      false
+    );
+
+    // Update metadata
+    await recordingBackup.saveMetadata(this.sessionId, {
+      deviceType: this.deviceType,
+      startTime: this.startTime,
+      lastChunkNumber: this.chunkNumber,
+    });
+
+    // Add to upload queue
+    this.uploadQueue.push({ chunkId, blob, chunkNumber: this.chunkNumber });
+
+    // Process queue
+    this.processUploadQueue();
+  }
+
+  async processUploadQueue() {
+    if (this.isUploading || this.uploadQueue.length === 0) return;
+
+    this.isUploading = true;
+
+    while (this.uploadQueue.length > 0) {
+      const { chunkId, blob, chunkNumber } = this.uploadQueue[0];
+
+      const success = await this.uploadChunkWithRetry(chunkId, blob, chunkNumber);
+
+      if (success) {
+        // Remove from queue
+        this.uploadQueue.shift();
+        this.uploadedChunkIds.add(chunkId);
+
+        // Mark as uploaded in IndexedDB
+        await recordingBackup.markChunkUploaded(chunkId);
+
+        this.showNotification(`Chunk ${chunkNumber} saved`, 'success', 2000);
+      } else {
+        // If upload failed after retries, keep in queue and try again later
+        console.warn(`[${this.deviceType}] Chunk ${chunkNumber} upload failed, will retry later`);
+        break; // Stop processing queue for now
+      }
+    }
+
+    this.isUploading = false;
+  }
+
+  async uploadChunkWithRetry(chunkId, blob, chunkNumber, attempt = 1) {
+    const maxAttempts = 5;
+    const baseDelay = 2000; // 2 seconds
+
     const formData = new FormData();
-    formData.append('video', blob, `${this.deviceType}_chunk_${this.chunkNumber}.webm`);
+    formData.append('video', blob, `${this.deviceType}_chunk_${chunkNumber}.webm`);
     formData.append('sessionId', this.sessionId);
     formData.append('deviceType', this.deviceType);
-    formData.append('chunkNumber', this.chunkNumber.toString());
+    formData.append('chunkNumber', chunkNumber.toString());
     formData.append('timestamp', Date.now().toString());
 
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
       const response = await fetch('/api/upload-chunk', {
         method: 'POST',
         body: formData,
+        signal: controller.signal,
       });
 
+      clearTimeout(timeout);
+
       const result = await response.json();
+
       if (result.success) {
-        console.log(`[${this.deviceType}] Chunk ${this.chunkNumber} uploaded successfully`);
+        console.log(`[${this.deviceType}] Chunk ${chunkNumber} uploaded successfully (attempt ${attempt})`);
+        return true;
       } else {
-        console.error(`[${this.deviceType}] Chunk upload failed:`, result.message);
+        throw new Error(result.message);
       }
     } catch (error) {
-      console.error(`[${this.deviceType}] Chunk upload error:`, error);
-      // Store failed chunks for retry
+      console.error(`[${this.deviceType}] Chunk ${chunkNumber} upload error (attempt ${attempt}):`, error);
+
+      if (attempt < maxAttempts) {
+        // Exponential backoff
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        console.log(`[${this.deviceType}] Retrying chunk ${chunkNumber} in ${delay}ms...`);
+
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return this.uploadChunkWithRetry(chunkId, blob, chunkNumber, attempt + 1);
+      } else {
+        console.error(`[${this.deviceType}] Chunk ${chunkNumber} failed after ${maxAttempts} attempts`);
+        this.showNotification(`Chunk ${chunkNumber} saved locally (connection issue)`, 'warning');
+        return false;
+      }
+    }
+  }
+
+  async retryFailedUploads() {
+    const unuploaded = await recordingBackup.getUnuploadedChunks(this.sessionId);
+
+    if (unuploaded.length > 0) {
+      console.log(`[${this.deviceType}] Retrying ${unuploaded.length} failed uploads...`);
+
+      for (const chunk of unuploaded) {
+        if (!this.uploadedChunkIds.has(chunk.id)) {
+          this.uploadQueue.push({
+            chunkId: chunk.id,
+            blob: chunk.blob,
+            chunkNumber: chunk.chunkNumber,
+          });
+        }
+      }
+
+      this.processUploadQueue();
     }
   }
 
   async stopRecording() {
     this.isRecording = false;
 
-    // Clear interval
+    // Clear intervals
     if (this.chunkInterval) {
       clearInterval(this.chunkInterval);
       this.chunkInterval = null;
+    }
+
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
     }
 
     // Stop media recorder
@@ -125,6 +426,12 @@ class RecordingManager {
     // Wait a bit for final ondataavailable event
     await new Promise(resolve => setTimeout(resolve, 500));
 
+    // Wait for all chunks to upload
+    while (this.uploadQueue.length > 0) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await this.processUploadQueue();
+    }
+
     console.log(`[${this.deviceType}] Recording stopped`);
   }
 
@@ -133,6 +440,8 @@ class RecordingManager {
       console.warn(`[${this.deviceType}] No chunks to upload for final video`);
       return;
     }
+
+    this.showNotification('Finalizing recording...', 'info');
 
     const blob = new Blob(this.allChunks, { type: 'video/webm' });
     const duration = Math.floor((Date.now() - this.startTime) / 1000);
@@ -145,22 +454,73 @@ class RecordingManager {
     formData.append('interventionCount', interventionCount.toString());
 
     try {
-      const response = await fetch('/api/upload-final', {
-        method: 'POST',
-        body: formData,
-      });
+      const response = await this.uploadWithRetry('/api/upload-final', formData, 5);
 
       const result = await response.json();
       if (result.success) {
         console.log(`[${this.deviceType}] Final video uploaded successfully`);
+        this.showNotification('Recording uploaded successfully!', 'success');
+
+        // Clear IndexedDB data for this session
+        await recordingBackup.clearSession(this.sessionId);
+
         return result;
       } else {
-        console.error(`[${this.deviceType}] Final upload failed:`, result.message);
         throw new Error(result.message);
       }
     } catch (error) {
       console.error(`[${this.deviceType}] Final upload error:`, error);
+      this.showNotification('Upload failed - data saved locally for recovery', 'error');
       throw error;
+    }
+  }
+
+  async uploadWithRetry(url, formData, maxAttempts = 5) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60000); // 60 second timeout for final upload
+
+        const response = await fetch(url, {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+
+        if (response.ok) {
+          return response;
+        } else {
+          throw new Error(`HTTP ${response.status}`);
+        }
+      } catch (error) {
+        console.error(`Upload attempt ${attempt} failed:`, error);
+
+        if (attempt < maxAttempts) {
+          const delay = 2000 * Math.pow(2, attempt - 1);
+          console.log(`Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else {
+          throw error;
+        }
+      }
+    }
+  }
+
+  showNotification(message, type = 'info', duration = 3000) {
+    // Check if we should show notifications for this device type
+    const notificationEl = document.getElementById(`${this.deviceType}Notification`);
+    if (!notificationEl) return;
+
+    notificationEl.textContent = message;
+    notificationEl.className = `recording-notification ${type}`;
+    notificationEl.style.display = 'block';
+
+    if (duration > 0) {
+      setTimeout(() => {
+        notificationEl.style.display = 'none';
+      }, duration);
     }
   }
 

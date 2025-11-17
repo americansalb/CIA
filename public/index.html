@@ -140,39 +140,81 @@
 
     <!-- Page 5: Test Interface -->
     <div id="page5" class="page">
-      <h1>Consecutive Interpreting Assessment</h1>
+      <div class="test-header">
+        <h1>Consecutive Interpreting Assessment</h1>
+        <div class="timer-display" id="timerDisplay">00:00</div>
+      </div>
+
+      <!-- Recording Notifications -->
+      <div id="mainNotification" class="recording-notification" style="display: none;"></div>
 
       <div class="segment-info">
-        <span id="segmentInfo">Segment 1 of X</span>
+        <span id="segmentInfo">Loading...</span>
+        <div class="segment-progress">
+          <div class="segment-progress-bar" id="segmentProgressBar"></div>
+        </div>
       </div>
 
       <div class="video-container">
         <div class="video-preview">
           <video id="mainVideo" autoplay muted playsinline></video>
           <div class="video-label">Main Camera</div>
-          <div class="recording-indicator" id="mainRecording">● REC</div>
+          <div class="recording-indicator active" id="mainRecording">
+            <span class="rec-dot"></span>
+            <span>REC</span>
+          </div>
+          <div class="connection-status" id="mainConnectionStatus">
+            <span class="status-dot"></span>
+            <span class="status-text">Connected</span>
+          </div>
         </div>
 
         <div class="video-preview">
           <video id="proctorVideo" autoplay muted playsinline></video>
           <div class="video-label">Proctor Camera</div>
-          <div class="recording-indicator" id="proctorRecording">● REC</div>
+          <div class="recording-indicator active" id="proctorRecording">
+            <span class="rec-dot"></span>
+            <span>REC</span>
+          </div>
         </div>
       </div>
 
-      <audio id="audioPlayer" class="audio-player"></audio>
-
-      <div class="timer-display" id="timerDisplay">00:00</div>
+      <div class="audio-player-container">
+        <audio id="audioPlayer" class="audio-player"></audio>
+        <div class="audio-controls" id="audioControls" style="display: none;">
+          <button class="audio-control-btn" id="audioPlayPauseBtn">
+            <span>▶</span>
+          </button>
+          <div class="audio-progress">
+            <div class="audio-progress-bar" id="audioProgressBar"></div>
+          </div>
+          <span class="audio-time" id="audioTime">0:00 / 0:00</span>
+        </div>
+      </div>
 
       <div class="test-controls">
-        <button id="interventionBtn" onclick="startIntervention()">🎤 Request Intervention</button>
-        <button id="continueBtn" onclick="continueToNext()" style="display: none;">Continue</button>
+        <button class="btn-intervention" id="interventionBtn" onclick="startIntervention()">
+          <span class="btn-icon">🎤</span>
+          <span>Request Intervention</span>
+        </button>
+        <button class="btn-continue" id="continueBtn" onclick="continueToNext()" style="display: none;">
+          <span class="btn-icon">→</span>
+          <span>Continue to Next Segment</span>
+        </button>
       </div>
 
-      <div class="intervention-counter">
-        <p>Interventions Used: <span id="interventionCount">0</span>/10</p>
-        <p id="interventionWarning" style="display: none;"></p>
+      <div class="intervention-stats">
+        <div class="stat-card">
+          <div class="stat-label">Interventions Used</div>
+          <div class="stat-value"><span id="interventionCount">0</span>/10</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Repetitions Remaining</div>
+          <div class="stat-value" id="repetitionsRemaining">5</div>
+        </div>
       </div>
+
+      <div id="interventionWarning" class="alert-warning" style="display: none;"></div>
     </div>
 
     <!-- Page 6: Test Complete -->
