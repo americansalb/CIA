@@ -38,10 +38,10 @@ async function getStudentRecord(email, studentId) {
   }
 }
 
-async function isAdmin(email) {
+async function validateAdmin(email, password) {
   try {
     const sheets = await getSheets();
-    const range = process.env.ADMIN_SHEET_RANGE || 'Admins!A:A';
+    const range = process.env.ADMIN_SHEET_RANGE || 'Admin!A:B';
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
@@ -53,21 +53,24 @@ async function isAdmin(email) {
       return false;
     }
 
-    // Check if email exists in admin list
+    // Check if email and password match
     for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0]?.toLowerCase() === email.toLowerCase()) {
+      const [rowEmail, rowPassword] = rows[i];
+
+      if (rowEmail?.toLowerCase() === email.toLowerCase() &&
+          rowPassword === password) {
         return true;
       }
     }
 
     return false;
   } catch (error) {
-    console.error('Error checking admin status:', error);
+    console.error('Error validating admin:', error);
     throw error;
   }
 }
 
 module.exports = {
   getStudentRecord,
-  isAdmin,
+  validateAdmin,
 };

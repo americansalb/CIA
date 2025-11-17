@@ -1,4 +1,4 @@
-const { isAdmin } = require('../utils/sheets-helper');
+const { validateAdmin } = require('../utils/sheets-helper');
 
 module.exports = async (req, res) => {
   try {
@@ -11,29 +11,13 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Check password first
-    const adminPassword = process.env.ADMIN_PASSWORD;
-    if (!adminPassword) {
-      return res.status(500).json({
-        success: false,
-        message: 'Admin password not configured',
-      });
-    }
+    // Check email and password against Admin sheet
+    const isValid = await validateAdmin(email, password);
 
-    if (password !== adminPassword) {
+    if (!isValid) {
       return res.status(403).json({
         success: false,
-        message: 'Invalid password',
-      });
-    }
-
-    // Then check if email is in admin whitelist
-    const adminStatus = await isAdmin(email);
-
-    if (!adminStatus) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied. You are not authorized as an administrator.',
+        message: 'Invalid email or password',
       });
     }
 
