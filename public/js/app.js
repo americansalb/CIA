@@ -79,11 +79,15 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
       if (sessionResult.success) {
         sessionData = sessionResult;
 
-        // Load test configuration
-        testConfig = TEST_CONFIGS[studentData.permittedTest];
-        if (!testConfig) {
-          throw new Error(`Test configuration not found for ${studentData.permittedTest}`);
+        // Load test configuration from Google Sheets
+        const testConfigResponse = await fetch(`/api/test-config?testName=${encodeURIComponent(studentData.permittedTest)}`);
+        const testConfigResult = await testConfigResponse.json();
+
+        if (!testConfigResult.success || !testConfigResult.config || testConfigResult.config.segments.length === 0) {
+          throw new Error(`Test "${studentData.permittedTest}" has not been configured yet. Please contact your administrator.`);
         }
+
+        testConfig = testConfigResult.config;
 
         // Show test info
         document.getElementById('testInfo').innerHTML = `
