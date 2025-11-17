@@ -39,6 +39,33 @@ function showPage(pageId) {
   document.getElementById(pageId).classList.add('active');
 }
 
+// Setup universal instructions
+function setupUniversalInstructions(videoUrl) {
+  const videoPlayer = document.getElementById('universalInstructionsVideo');
+  const continueBtn = document.getElementById('instructionsContinueBtn');
+
+  videoPlayer.src = videoUrl;
+  continueBtn.disabled = true;
+
+  // Enable continue button when video ends or after 5 seconds (whichever comes first)
+  let canContinue = false;
+
+  videoPlayer.onended = () => {
+    canContinue = true;
+    continueBtn.disabled = false;
+    continueBtn.textContent = 'I Understand - Continue';
+  };
+
+  // Allow skipping after 5 seconds
+  setTimeout(() => {
+    if (!canContinue) {
+      canContinue = true;
+      continueBtn.disabled = false;
+      continueBtn.textContent = 'Continue (or wait for video to finish)';
+    }
+  }, 5000);
+}
+
 // Login form handler
 document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -89,13 +116,24 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
 
         testConfig = testConfigResult.config;
 
+        // Load universal instructions
+        const universalResponse = await fetch('/api/test-config?testName=_UNIVERSAL_INSTRUCTIONS');
+        const universalResult = await universalResponse.json();
+
         // Show test info
         document.getElementById('testInfo').innerHTML = `
           <p><strong>Test:</strong> ${studentData.permittedTest}</p>
           <p><strong>Attempt:</strong> ${studentData.attempts}</p>
         `;
 
-        showPage('page2');
+        // If universal instructions exist, show them first
+        if (universalResult.success && universalResult.config && universalResult.config.segments.length > 0) {
+          setupUniversalInstructions(universalResult.config.segments[0]);
+          showPage('pageInstructions');
+        } else {
+          // No universal instructions, go straight to text instructions
+          showPage('page2');
+        }
       } else {
         throw new Error(sessionResult.message);
       }
