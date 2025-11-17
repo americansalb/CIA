@@ -19,6 +19,9 @@ app.post('/api/join-proctor', require('./api/join-proctor'));
 app.get('/api/session-status/:sessionId', require('./api/session-status'));
 app.get('/api/recordings', require('./api/get-recordings'));
 app.post('/api/update-grade', require('./api/update-grade'));
+app.get('/api/tests', require('./api/get-tests'));
+app.get('/api/test-config', require('./api/get-test-config'));
+app.post('/api/save-test', require('./api/save-test'));
 
 // Serve main app
 app.get('/', (req, res) => {

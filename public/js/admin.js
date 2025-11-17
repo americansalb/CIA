@@ -32,6 +32,9 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
 
       // Load recordings
       await loadRecordings();
+
+      // Load tests
+      await loadTests();
     } else {
       errorDiv.textContent = result.message;
       errorDiv.style.display = 'block';

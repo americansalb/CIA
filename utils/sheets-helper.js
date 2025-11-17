@@ -41,7 +41,7 @@ async function getStudentRecord(email, studentId) {
 async function validateAdmin(email, password) {
   try {
     const sheets = await getSheets();
-    const range = process.env.ADMIN_SHEET_RANGE || 'Admin!A:B';
+    const range = process.env.ADMIN_SHEET_RANGE || 'Admins!A:B';
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
@@ -70,7 +70,165 @@ async function validateAdmin(email, password) {
   }
 }
 
+async function getAllTests() {
+  try {
+    const sheets = await getSheets();
+
+    // Get all unique tests from Students sheet
+    const studentsRange = process.env.STUDENTS_SHEET_RANGE || 'Students!A:D';
+    const studentsResponse = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: studentsRange,
+    });
+
+    const studentRows = studentsResponse.data.values || [];
+    const uniqueTests = new Set();
+
+    // Skip header, get unique test names
+    for (let i = 1; i < studentRows.length; i++) {
+      const [, , permittedTest] = studentRows[i];
+      if (permittedTest) {
+        uniqueTests.add(permittedTest);
+      }
+    }
+
+    // Get configured tests from Tests sheet
+    const testsRange = process.env.TESTS_SHEET_RANGE || 'Tests!A:D';
+    let testsResponse;
+    try {
+      testsResponse = await sheets.spreadsheets.values.get({
+        spreadsheetId: process.env.GOOGLE_SHEET_ID,
+        range: testsRange,
+      });
+    } catch (error) {
+      // Tests sheet doesn't exist yet
+      return Array.from(uniqueTests).map(name => ({
+        name,
+        configured: false,
+        segmentCount: 0,
+      }));
+    }
+
+    const testRows = testsResponse.data.values || [];
+    const testConfigs = {};
+
+    // Parse test configurations
+    for (let i = 1; i < testRows.length; i++) {
+      const [testName, segmentNum, audioUrl, status] = testRows[i];
+      if (!testConfigs[testName]) {
+        testConfigs[testName] = [];
+      }
+      testConfigs[testName].push({
+        segmentNumber: parseInt(segmentNum),
+        audioUrl,
+        status: status || 'active',
+      });
+    }
+
+    // Combine unique tests with their configs
+    return Array.from(uniqueTests).map(name => ({
+      name,
+      configured: !!testConfigs[name],
+      segmentCount: testConfigs[name]?.length || 0,
+      segments: testConfigs[name] || [],
+    }));
+  } catch (error) {
+    console.error('Error getting all tests:', error);
+    throw error;
+  }
+}
+
+async function getTestConfig(testName) {
+  try {
+    const sheets = await getSheets();
+    const range = process.env.TESTS_SHEET_RANGE || 'Tests!A:D';
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: range,
+    });
+
+    const rows = response.data.values || [];
+    const segments = [];
+
+    for (let i = 1; i < rows.length; i++) {
+      const [name, segmentNum, audioUrl, status] = rows[i];
+      if (name === testName && status === 'active') {
+        segments.push({
+          segmentNumber: parseInt(segmentNum),
+          audioUrl,
+        });
+      }
+    }
+
+    // Sort by segment number
+    segments.sort((a, b) => a.segmentNumber - b.segmentNumber);
+
+    return {
+      testName,
+      segments: segments.map(s => s.audioUrl),
+    };
+  } catch (error) {
+    console.error('Error getting test config:', error);
+    throw error;
+  }
+}
+
+async function saveTestSegments(testName, segments) {
+  try {
+    const sheets = await getSheets();
+    const range = process.env.TESTS_SHEET_RANGE || 'Tests!A:D';
+
+    // First, get existing data to preserve other tests
+    let existingRows = [];
+    try {
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: process.env.GOOGLE_SHEET_ID,
+        range: range,
+      });
+      existingRows = response.data.values || [];
+    } catch (error) {
+      // Sheet doesn't exist, will create with headers
+      existingRows = [['Test_Name', 'Segment_Number', 'Audio_URL', 'Status']];
+    }
+
+    // Remove old entries for this test
+    const filteredRows = existingRows.filter((row, index) => {
+      if (index === 0) return true; // Keep header
+      return row[0] !== testName;
+    });
+
+    // Add new segments
+    segments.forEach((url, index) => {
+      filteredRows.push([
+        testName,
+        (index + 1).toString(),
+        url,
+        'active',
+      ]);
+    });
+
+    // Write back to sheet
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: range,
+      valueInputOption: 'RAW',
+      resource: {
+        values: filteredRows,
+      },
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Error saving test segments:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   getStudentRecord,
   validateAdmin,
+  getAllTests,
+  getTestConfig,
+  saveTestSegments,
 };

@@ -170,6 +170,142 @@
     .filter-bar select {
       padding: 8px 12px;
     }
+
+    .tab-nav {
+      background: white;
+      padding: 0 20px;
+      border-radius: 8px 8px 0 0;
+      display: flex;
+      gap: 10px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 0;
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      padding: 15px 25px;
+      color: #666;
+      font-weight: 600;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      transition: all 0.3s;
+    }
+
+    .tab-btn:hover {
+      color: #667eea;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .tab-btn.active {
+      color: #667eea;
+      border-bottom-color: #667eea;
+    }
+
+    .tab-content {
+      display: none;
+      padding-top: 20px;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .test-card {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 15px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .test-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+
+    .test-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .test-name {
+      font-size: 20px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .test-status {
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .test-configured {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .test-not-configured {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .test-info {
+      color: #666;
+      font-size: 14px;
+    }
+
+    .test-editor {
+      background: white;
+      border-radius: 8px;
+      padding: 30px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .segment-list {
+      margin: 20px 0;
+    }
+
+    .segment-item {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+      align-items: center;
+    }
+
+    .segment-item input {
+      flex: 1;
+      padding: 10px;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .segment-item button {
+      padding: 10px 15px;
+      background: #dc3545;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .add-segment-btn {
+      background: #28a745 !important;
+      margin-bottom: 20px;
+    }
+
+    .back-btn {
+      background: #6c757d !important;
+      margin-right: 10px;
+    }
   </style>
 </head>
 <body>
@@ -204,28 +340,50 @@
         <p style="color: #666; margin-top: 10px;">Logged in as: <strong id="adminEmailDisplay"></strong></p>
       </div>
 
-      <div class="filter-bar">
-        <label>Filter by status:</label>
-        <select id="statusFilter" onchange="filterRecordings()">
-          <option value="all">All Recordings</option>
-          <option value="pending_review">Pending Review</option>
-          <option value="graded">Graded</option>
-        </select>
-
-        <label style="margin-left: auto;">Sort by:</label>
-        <select id="sortFilter" onchange="filterRecordings()">
-          <option value="newest">Newest First</option>
-          <option value="oldest">Oldest First</option>
-        </select>
+      <!-- Tab Navigation -->
+      <div class="tab-nav">
+        <button class="tab-btn active" onclick="switchTab('recordings')">Recordings</button>
+        <button class="tab-btn" onclick="switchTab('tests')">Manage Tests</button>
       </div>
 
-      <div id="recordingsContainer">
-        <div class="loading-spinner"></div>
+      <!-- Recordings Tab -->
+      <div id="recordingsTab" class="tab-content active">
+        <div class="filter-bar">
+          <label>Filter by status:</label>
+          <select id="statusFilter" onchange="filterRecordings()">
+            <option value="all">All Recordings</option>
+            <option value="pending_review">Pending Review</option>
+            <option value="graded">Graded</option>
+          </select>
+
+          <label style="margin-left: auto;">Sort by:</label>
+          <select id="sortFilter" onchange="filterRecordings()">
+            <option value="newest">Newest First</option>
+            <option value="oldest">Oldest First</option>
+          </select>
+        </div>
+
+        <div id="recordingsContainer">
+          <div class="loading-spinner"></div>
+        </div>
+      </div>
+
+      <!-- Tests Tab -->
+      <div id="testsTab" class="tab-content">
+        <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h2 style="margin: 0 0 10px 0;">Test Configuration</h2>
+          <p style="color: #666; margin: 0;">Configure audio segments for each test. Tests are automatically detected from the Students sheet.</p>
+        </div>
+
+        <div id="testsContainer">
+          <div class="loading-spinner"></div>
+        </div>
       </div>
     </div>
 
   </div>
 
   <script src="/js/admin.js"></script>
+  <script src="/js/test-manager.js"></script>
 </body>
 </html>
