@@ -8,6 +8,7 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
   e.preventDefault();
 
   const email = document.getElementById('adminEmail').value.trim();
+  const password = document.getElementById('adminPassword').value;
   const errorDiv = document.getElementById('adminLoginError');
   const form = document.getElementById('adminLoginForm');
 
@@ -17,7 +18,7 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
     const response = await fetch('/api/validate-admin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, password }),
     });
 
     const result = await response.json();
