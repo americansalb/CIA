@@ -145,7 +145,11 @@ module.exports = async (req, res) => {
       const fileData = fs.readFileSync(segment.path);
 
       // Upload to Bunny.net Storage using fetch (Node 18+) or https module
-      const uploadUrl = `https://storage.bunnycdn.com/${bunnyStorageZone}/${fileName}`;
+      // Use regional endpoint if region is specified
+      const storageEndpoint = bunnyRegion && bunnyRegion !== 'de'
+        ? `https://${bunnyRegion}.storage.bunnycdn.com`
+        : 'https://storage.bunnycdn.com';
+      const uploadUrl = `${storageEndpoint}/${bunnyStorageZone}/${fileName}`;
 
       try {
         // Try using built-in fetch if available (Node 18+)
