@@ -364,9 +364,9 @@ async function checkVideoQuality() {
           const videoWidth = previewVideo.videoWidth;
           const videoHeight = previewVideo.videoHeight;
 
-          // Require 10% margin from all edges to ensure full face visibility
-          const marginX = videoWidth * 0.1;
-          const marginY = videoHeight * 0.1;
+          // Require 5% margin from all edges to ensure full face visibility
+          const marginX = videoWidth * 0.05;
+          const marginY = videoHeight * 0.05;
 
           const isFaceFullyVisible =
             box.xMin > marginX &&
@@ -534,9 +534,9 @@ async function startTestQualityMonitoring() {
           const videoWidth = mainVideo.videoWidth;
           const videoHeight = mainVideo.videoHeight;
 
-          // Require 10% margin from all edges
-          const marginX = videoWidth * 0.1;
-          const marginY = videoHeight * 0.1;
+          // Require 5% margin from all edges
+          const marginX = videoWidth * 0.05;
+          const marginY = videoHeight * 0.05;
 
           const isFaceFullyVisible =
             box.xMin > marginX &&
