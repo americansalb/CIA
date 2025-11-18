@@ -86,10 +86,39 @@
         <li><strong>Request Research Pause:</strong> Take up to 90 seconds to look up terminology</li>
       </ul>
 
-      <button onclick="showPage('page3')">I Understand - Continue</button>
+      <button onclick="showPage('page4')">I Understand - Continue</button>
     </div>
 
-    <!-- Page 3: Proctor Setup -->
+    <!-- Page 4: Camera/Mic Permissions (MOVED BEFORE PROCTOR) -->
+    <div id="page4" class="page">
+      <h1>Camera & Microphone Setup</h1>
+      <p>We need access to your camera and microphone. Please check that your face is visible, lighting is good, and resolution is adequate.</p>
+
+      <div id="permissionError" class="error-message" style="display: none;"></div>
+      <div id="qualityWarning" class="warning-message" style="display: none;"></div>
+
+      <div class="video-preview" style="max-width: 640px; margin: 20px auto;">
+        <video id="previewVideo" autoplay muted playsinline></video>
+        <div class="video-label">Your Camera</div>
+      </div>
+
+      <div id="qualityChecks" style="text-align: center; margin: 20px 0; display: none;">
+        <p id="faceStatus" style="color: #666;">Face Detection: <span id="faceDetected">Checking...</span></p>
+        <p id="lightingStatus" style="color: #666;">Lighting: <span id="lightingLevel">Checking...</span></p>
+        <p id="resolutionStatus" style="color: #666;">Resolution: <span id="resolutionCheck">Checking...</span></p>
+      </div>
+
+      <div style="text-align: center; margin: 20px 0;">
+        <p id="micStatus" style="color: #666;">Microphone: <span id="micLevel">Checking...</span></p>
+      </div>
+
+      <div style="text-align: center;">
+        <button id="requestPermissionsBtn" onclick="requestPermissions()">Grant Permissions</button>
+        <button onclick="showPage('page3')" id="continueToProctorBtn" disabled>Continue to Proctor Setup</button>
+      </div>
+    </div>
+
+    <!-- Page 3: Proctor Setup (MOVED AFTER CAMERA) -->
     <div id="page3" class="page">
       <h1>Set Up Proctoring Device</h1>
       <p>Please use your second device to join as a proctor. Use EITHER the QR code OR the PIN below.</p>
@@ -113,29 +142,7 @@
         ✓ Proctor device connected! You may proceed.
       </div>
 
-      <button id="proceedBtn" onclick="showPage('page4')" disabled>Continue to Camera Setup</button>
-    </div>
-
-    <!-- Page 4: Camera/Mic Permissions -->
-    <div id="page4" class="page">
-      <h1>Camera & Microphone Setup</h1>
-      <p>We need access to your camera and microphone for this assessment.</p>
-
-      <div id="permissionError" class="error-message" style="display: none;"></div>
-
-      <div class="video-preview" style="max-width: 640px; margin: 20px auto;">
-        <video id="previewVideo" autoplay muted playsinline></video>
-        <div class="video-label">Your Camera</div>
-      </div>
-
-      <div style="text-align: center; margin: 20px 0;">
-        <p id="micStatus" style="color: #666;">Microphone: <span id="micLevel">Checking...</span></p>
-      </div>
-
-      <div style="text-align: center;">
-        <button id="requestPermissionsBtn" onclick="requestPermissions()">Grant Permissions</button>
-        <button onclick="showPage('page5')" id="continueToTestBtn" disabled>Continue to Test</button>
-      </div>
+      <button id="proceedBtn" onclick="showPage('page5')" disabled>Continue to Test</button>
     </div>
 
     <!-- Page 5: Test Interface -->

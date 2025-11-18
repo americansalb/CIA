@@ -195,23 +195,16 @@ async function checkProctorConnection() {
   }, 2000); // Check every 2 seconds
 }
 
-// Override showPage to handle special setup
-const originalShowPage = showPage;
-showPage = function(pageId) {
-  originalShowPage(pageId);
-
-  if (pageId === 'page3') {
-    setupProctorPage();
-  }
-};
-
 // Request camera and microphone permissions
 async function requestPermissions() {
   const errorDiv = document.getElementById('permissionError');
+  const warningDiv = document.getElementById('qualityWarning');
   const requestBtn = document.getElementById('requestPermissionsBtn');
-  const continueBtn = document.getElementById('continueToTestBtn');
+  const continueBtn = document.getElementById('continueToProctorBtn');
+  const qualityChecks = document.getElementById('qualityChecks');
 
   errorDiv.style.display = 'none';
+  warningDiv.style.display = 'none';
   requestBtn.disabled = true;
 
   try {
@@ -231,6 +224,30 @@ async function requestPermissions() {
     // Show preview
     const previewVideo = document.getElementById('previewVideo');
     previewVideo.srcObject = mainStream;
+    qualityChecks.style.display = 'block';
+
+    // Check video quality
+    previewVideo.onloadedmetadata = () => {
+      const width = previewVideo.videoWidth;
+      const height = previewVideo.videoHeight;
+
+      // Resolution check
+      const resolutionCheck = document.getElementById('resolutionCheck');
+      if (width >= 1280 && height >= 720) {
+        resolutionCheck.innerHTML = '<span style="color: #4caf50;">✓ Good (720p+)</span>';
+      } else if (width >= 640 && height >= 480) {
+        resolutionCheck.innerHTML = '<span style="color: #ff9800;">⚠ Acceptable (480p)</span>';
+        warningDiv.textContent = 'Video resolution is lower than recommended. Please use a better camera if possible.';
+        warningDiv.style.display = 'block';
+      } else {
+        resolutionCheck.innerHTML = '<span style="color: #f44336;">✗ Too Low</span>';
+        warningDiv.textContent = 'Video resolution is too low. Please use a better camera.';
+        warningDiv.style.display = 'block';
+      }
+
+      // Start quality checks
+      checkVideoQuality();
+    };
 
     // Test microphone
     const audioContext = new AudioContext();
@@ -240,18 +257,20 @@ async function requestPermissions() {
     analyser.fftSize = 256;
 
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    let micWorking = false;
 
     function checkAudio() {
       analyser.getByteFrequencyData(dataArray);
       const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
       document.getElementById('micLevel').textContent = average > 10 ? '✓ Working' : 'Speak to test...';
 
-      if (average > 10) {
+      if (average > 10 && !micWorking) {
+        micWorking = true;
         setTimeout(() => {
-          continueBtn.disabled = false;
           document.getElementById('micStatus').innerHTML = '<span style="color: #4caf50;">✓ Microphone is working</span>';
+          checkIfReadyToContinue();
         }, 1000);
-      } else {
+      } else if (!micWorking) {
         requestAnimationFrame(checkAudio);
       }
     }
@@ -266,32 +285,122 @@ async function requestPermissions() {
   }
 }
 
-// Start test
-document.getElementById('continueToTestBtn')?.addEventListener('click', async () => {
-  if (!mainStream) return;
+// Check video quality (lighting and face detection)
+let qualityCheckInterval;
+function checkVideoQuality() {
+  const previewVideo = document.getElementById('previewVideo');
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
 
-  showPage('page5');
+  canvas.width = previewVideo.videoWidth;
+  canvas.height = previewVideo.videoHeight;
 
-  // Set up video displays
-  document.getElementById('mainVideo').srcObject = mainStream;
+  qualityCheckInterval = setInterval(() => {
+    ctx.drawImage(previewVideo, 0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
 
-  // Initialize recorders
-  mainRecorder = new RecordingManager('main', sessionData.sessionId);
-  await mainRecorder.startRecording(mainStream);
+    // Check lighting (average brightness)
+    let totalBrightness = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+      totalBrightness += brightness;
+    }
+    const avgBrightness = totalBrightness / (data.length / 4);
 
-  document.getElementById('mainRecording').classList.add('active');
+    const lightingLevel = document.getElementById('lightingLevel');
+    if (avgBrightness > 100 && avgBrightness < 200) {
+      lightingLevel.innerHTML = '<span style="color: #4caf50;">✓ Good</span>';
+    } else if (avgBrightness <= 100) {
+      lightingLevel.innerHTML = '<span style="color: #ff9800;">⚠ Too Dark</span>';
+      document.getElementById('qualityWarning').textContent = 'Lighting is too dark. Please improve lighting.';
+      document.getElementById('qualityWarning').style.display = 'block';
+    } else {
+      lightingLevel.innerHTML = '<span style="color: #ff9800;">⚠ Too Bright</span>';
+      document.getElementById('qualityWarning').textContent = 'Lighting is too bright. Please adjust lighting.';
+      document.getElementById('qualityWarning').style.display = 'block';
+    }
 
-  // Note: Proctor recorder will be managed by the proctor device
-  // For now, we'll show a placeholder for the proctor video
-  document.getElementById('proctorVideo').srcObject = null; // Will be handled separately
+    // Simple face detection using brightness variance in face region
+    const faceRegion = ctx.getImageData(
+      canvas.width * 0.25, canvas.height * 0.15,
+      canvas.width * 0.5, canvas.height * 0.5
+    );
+    const faceData = faceRegion.data;
+    let faceVariance = 0;
+    let faceBrightness = 0;
 
-  // Start test timer
-  testStartTime = Date.now();
-  startTestTimer();
+    for (let i = 0; i < faceData.length; i += 4) {
+      const brightness = (faceData[i] + faceData[i + 1] + faceData[i + 2]) / 3;
+      faceBrightness += brightness;
+    }
+    faceBrightness /= (faceData.length / 4);
 
-  // Load first segment
-  loadSegment(0);
-});
+    // Check if there's sufficient variation (indicating a face vs blank wall)
+    for (let i = 0; i < faceData.length; i += 4) {
+      const brightness = (faceData[i] + faceData[i + 1] + faceData[i + 2]) / 3;
+      faceVariance += Math.abs(brightness - faceBrightness);
+    }
+    faceVariance /= (faceData.length / 4);
+
+    const faceDetected = document.getElementById('faceDetected');
+    if (faceVariance > 20) {
+      faceDetected.innerHTML = '<span style="color: #4caf50;">✓ Face Visible</span>';
+    } else {
+      faceDetected.innerHTML = '<span style="color: #ff9800;">⚠ No Face Detected</span>';
+    }
+
+    checkIfReadyToContinue();
+  }, 1000);
+}
+
+// Check if all quality checks pass
+function checkIfReadyToContinue() {
+  const faceDetected = document.getElementById('faceDetected').textContent.includes('✓');
+  const lightingGood = document.getElementById('lightingLevel').textContent.includes('✓');
+  const micWorking = document.getElementById('micStatus').textContent.includes('✓');
+
+  if (faceDetected && lightingGood && micWorking) {
+    document.getElementById('continueToProctorBtn').disabled = false;
+    if (qualityCheckInterval) {
+      clearInterval(qualityCheckInterval);
+    }
+  }
+}
+
+// Start test - triggered when clicking Continue from proctor page (page3 -> page5)
+// Override the showPage function to handle test start
+const origShowPageFunc = showPage;
+showPage = async function(pageId) {
+  origShowPageFunc(pageId);
+
+  if (pageId === 'page3') {
+    setupProctorPage();
+  }
+
+  if (pageId === 'page5') {
+    // Set up video displays
+    if (mainStream) {
+      document.getElementById('mainVideo').srcObject = mainStream;
+
+      // Initialize recorders
+      mainRecorder = new RecordingManager('main', sessionData.sessionId);
+      await mainRecorder.startRecording(mainStream);
+
+      document.getElementById('mainRecording').classList.add('active');
+
+      // Note: Proctor recorder will be managed by the proctor device
+      document.getElementById('proctorVideo').srcObject = null; // Will be handled separately
+
+      // Start test timer
+      testStartTime = Date.now();
+      startTestTimer();
+
+      // Load first segment
+      loadSegment(0);
+    }
+  }
+};
 
 // Test timer
 function startTestTimer() {
