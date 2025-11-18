@@ -3,7 +3,7 @@ services:
     name: cia-assessment
     env: node
     plan: starter
-    buildCommand: npm install
+    buildCommand: apt-get update && apt-get install -y ffmpeg && npm install
     startCommand: npm start
     envVars:
       - key: NODE_ENV
