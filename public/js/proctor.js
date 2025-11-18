@@ -42,14 +42,12 @@ document.getElementById('proctorLoginForm')?.addEventListener('submit', async (e
         studentInfo: result.studentInfo,
       };
 
-      // Start proctor camera
-      await startProctorCamera();
-
-      // Show proctor view
-      showProctorPage('proctorView');
-
+      // Show student info
       document.getElementById('proctorStudentInfo').textContent =
         `${result.studentInfo.email} (ID: ${result.studentInfo.studentId})`;
+
+      // Request camera permissions and show verification page
+      await setupProctorVerification();
 
     } else {
       errorDiv.textContent = result.message;
@@ -70,6 +68,80 @@ function showProctorPage(pageId) {
     page.classList.remove('active');
   });
   document.getElementById(pageId).classList.add('active');
+}
+
+// Set up proctor camera verification page
+async function setupProctorVerification() {
+  try {
+    proctorStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        facingMode: 'environment', // Use back camera on mobile if available
+      },
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        sampleRate: 48000,
+      },
+    });
+
+    // Show verification page with camera preview
+    showProctorPage('proctorVerification');
+
+    // Set up camera preview
+    const verificationVideo = document.getElementById('proctorVerificationView');
+    verificationVideo.srcObject = proctorStream;
+
+    // Set up checkbox handler
+    const checkbox = document.getElementById('proctorPositionConfirm');
+    const startBtn = document.getElementById('startProctorRecordingBtn');
+
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) {
+        startBtn.disabled = false;
+        startBtn.style.opacity = '1';
+        startBtn.style.cursor = 'pointer';
+      } else {
+        startBtn.disabled = true;
+        startBtn.style.opacity = '0.5';
+        startBtn.style.cursor = 'not-allowed';
+      }
+    });
+
+    // Set up start button handler
+    startBtn.addEventListener('click', async () => {
+      await startProctorRecording();
+    });
+
+  } catch (error) {
+    console.error('Failed to access proctor camera:', error);
+    alert('Failed to access camera. Please grant permissions and refresh.');
+  }
+}
+
+async function startProctorRecording() {
+  try {
+    // Show proctor recording view
+    showProctorPage('proctorView');
+
+    // Set up video display
+    const proctorVideo = document.getElementById('proctorCameraView');
+    proctorVideo.srcObject = proctorStream;
+
+    // Start recording
+    proctorRecorder = new RecordingManager('proctor', proctorSessionData.sessionId);
+    await proctorRecorder.startRecording(proctorStream);
+
+    console.log('Proctor recording started');
+
+    // Poll for main device completion
+    pollForTestCompletion();
+
+  } catch (error) {
+    console.error('Failed to start proctor recording:', error);
+    alert('Failed to start recording. Please refresh and try again.');
+  }
 }
 
 async function startProctorCamera() {

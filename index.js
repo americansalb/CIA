@@ -24,6 +24,7 @@ app.get('/api/tests', require('./api/get-tests'));
 app.get('/api/test-config', require('./api/get-test-config'));
 app.post('/api/save-test', require('./api/save-test'));
 app.post('/api/split-and-upload', require('./api/split-and-upload'));
+app.post('/api/save-emergency-state', require('./api/save-emergency-state'));
 
 // Serve main app
 app.get('/', (req, res) => {

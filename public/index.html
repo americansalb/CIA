@@ -103,7 +103,7 @@
       </div>
 
       <div id="qualityChecks" style="text-align: center; margin: 20px 0; display: none;">
-        <p id="faceStatus" style="color: #666;">Face Detection: <span id="faceDetected">Checking...</span></p>
+        <p id="faceStatus" style="color: #666;">Video Activity: <span id="faceDetected">Checking...</span></p>
         <p id="lightingStatus" style="color: #666;">Lighting: <span id="lightingLevel">Checking...</span></p>
         <p id="resolutionStatus" style="color: #666;">Resolution: <span id="resolutionCheck">Checking...</span></p>
       </div>
@@ -163,6 +163,9 @@
       <!-- Recording Notifications -->
       <div id="mainNotification" class="recording-notification" style="display: none;"></div>
 
+      <!-- Upload Status Indicator -->
+      <div id="uploadStatus" class="upload-status" style="display: none;"></div>
+
       <div class="segment-info">
         <span id="segmentInfo">Loading...</span>
         <div class="segment-progress">
@@ -175,6 +178,20 @@
         <strong>📹 Continuous Monitoring Active:</strong>
         <span id="testFaceStatus" style="margin-left: 10px;">Face: ✓</span>
         <span id="testLightingStatus" style="margin-left: 10px;">Lighting: ✓</span>
+      </div>
+
+      <!-- Audio Input Visualization -->
+      <div id="audioVisualization" style="background: #f5f5f5; padding: 15px; border-radius: 6px; margin-bottom: 15px; display: none;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+          <strong style="color: #333;">🎤 Microphone Input:</strong>
+          <span id="audioStatus" style="color: #4caf50; font-weight: 600;">● Active</span>
+        </div>
+        <div style="background: #ddd; height: 30px; border-radius: 15px; overflow: hidden; position: relative;">
+          <div id="audioLevelBar" style="background: linear-gradient(90deg, #4caf50 0%, #8bc34a 50%, #ffeb3b 75%, #ff9800 100%); height: 100%; width: 0%; transition: width 0.1s ease-out; border-radius: 15px;"></div>
+        </div>
+        <div style="font-size: 12px; color: #666; margin-top: 5px; text-align: center;">
+          <span id="audioLevelText">0%</span>
+        </div>
       </div>
 
       <div class="video-container">

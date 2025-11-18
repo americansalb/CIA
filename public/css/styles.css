@@ -745,11 +745,127 @@ button:focus-visible {
   }
 }
 
+/* Upload Status Indicator */
+.upload-status {
+  padding: 12px 20px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  border: 2px solid;
+  transition: all 0.3s ease;
+}
+
+.upload-status.success {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-color: #4caf50;
+}
+
+.upload-status.warning {
+  background: #fff3e0;
+  color: #e65100;
+  border-color: #ff9800;
+  animation: pulse 2s infinite;
+}
+
+.upload-status.error {
+  background: #ffebee;
+  color: #c62828;
+  border-color: #f44336;
+}
+
+/* Recovery Notification */
+.recovery-notification {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10000;
+  animation: fadeIn 0.3s ease;
+}
+
+.recovery-content {
+  background: white;
+  padding: 40px;
+  border-radius: 12px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  text-align: center;
+}
+
+.recovery-content h3 {
+  color: #ff9800;
+  margin-bottom: 15px;
+  font-size: 24px;
+}
+
+.recovery-content p {
+  color: #666;
+  margin-bottom: 25px;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.recovery-content button {
+  background: #667eea;
+  color: white;
+  border: none;
+  padding: 12px 30px;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  margin: 0 10px;
+  transition: all 0.2s ease;
+}
+
+.recovery-content button:hover {
+  background: #5568d3;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.recovery-content button:last-child {
+  background: #999;
+}
+
+.recovery-content button:last-child:hover {
+  background: #777;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
 /* Print Styles */
 @media print {
   .test-controls,
   .intervention-stats,
-  .recording-notification {
+  .recording-notification,
+  .upload-status,
+  .recovery-notification {
     display: none;
   }
 }
