@@ -157,43 +157,11 @@ function setupProctorPage() {
     return;
   }
 
-  // Generate QR code
-  const proctorFullUrl = `${window.location.origin}/proctor?session=${sessionData.sessionId}&pin=${sessionData.proctorPin}`;
+  console.log('Setting up proctor page with PIN:', sessionData.proctorPin);
 
-  console.log('Setting up proctor page with URL:', proctorFullUrl);
-
-  // Display PIN and URL (primary method - always works)
+  // Display PIN prominently and URL simply
   document.getElementById('pinDisplay').textContent = sessionData.proctorPin;
   document.getElementById('proctorUrl').textContent = `${window.location.origin}/proctor`;
-
-  // Try to generate QR code (optional enhancement)
-  if (typeof QRCode !== 'undefined') {
-    try {
-      const qrContainer = document.querySelector('.qr-container');
-      QRCode.toCanvas(
-        document.getElementById('qrcode'),
-        proctorFullUrl,
-        { width: 250, margin: 2 },
-        (error) => {
-          if (error) {
-            console.error('QR code generation error:', error);
-            const errorEl = document.getElementById('qrCodeError');
-            if (errorEl) {
-              errorEl.textContent = 'QR code unavailable - use PIN method above';
-              errorEl.style.display = 'block';
-            }
-          } else {
-            console.log('QR code generated successfully');
-            if (qrContainer) qrContainer.style.display = 'block'; // Show QR code if successful
-          }
-        }
-      );
-    } catch (error) {
-      console.error('QR code exception:', error);
-    }
-  } else {
-    console.warn('QRCode library not loaded - PIN method will be used');
-  }
 
   // Poll for proctor connection
   checkProctorConnection();

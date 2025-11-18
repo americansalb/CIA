@@ -3,19 +3,15 @@ let proctorSessionData = null;
 let proctorStream = null;
 let proctorRecorder = null;
 
-// Check URL parameters on load
+// Check URL parameters on load (for backwards compatibility)
 window.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
-  const sessionId = urlParams.get('session');
   const pin = urlParams.get('pin');
 
-  if (sessionId && pin) {
-    // Auto-fill the form
-    document.getElementById('sessionId').value = sessionId;
+  if (pin) {
+    // Auto-fill the PIN if provided in URL
     document.getElementById('pin').value = pin;
-
-    // Auto-submit if both are present
-    document.getElementById('proctorLoginForm').dispatchEvent(new Event('submit'));
+    document.getElementById('pin').focus();
   }
 });
 
@@ -23,24 +19,26 @@ window.addEventListener('DOMContentLoaded', () => {
 document.getElementById('proctorLoginForm')?.addEventListener('submit', async (e) => {
   e.preventDefault();
 
-  const sessionId = document.getElementById('sessionId').value.trim();
   const pin = document.getElementById('pin').value.trim();
   const errorDiv = document.getElementById('proctorError');
+  const submitBtn = e.target.querySelector('button[type="submit"]');
 
   errorDiv.style.display = 'none';
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Connecting...';
 
   try {
     const response = await fetch('/api/join-proctor', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, pin }),
+      body: JSON.stringify({ pin }),
     });
 
     const result = await response.json();
 
     if (result.success) {
       proctorSessionData = {
-        sessionId,
+        sessionId: result.sessionId, // Get session ID from response
         studentInfo: result.studentInfo,
       };
 
@@ -56,10 +54,14 @@ document.getElementById('proctorLoginForm')?.addEventListener('submit', async (e
     } else {
       errorDiv.textContent = result.message;
       errorDiv.style.display = 'block';
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Connect Proctor Camera';
     }
   } catch (error) {
     errorDiv.textContent = `Error: ${error.message}`;
     errorDiv.style.display = 'block';
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Connect Proctor Camera';
   }
 });
 

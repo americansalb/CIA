@@ -2,39 +2,43 @@ const { sessions } = require('./create-session');
 
 module.exports = (req, res) => {
   try {
-    const { sessionId, pin } = req.body;
+    const { pin } = req.body;
 
-    if (!sessionId || !pin) {
+    if (!pin) {
       return res.status(400).json({
         success: false,
-        message: 'Session ID and PIN are required',
+        message: 'PIN is required',
       });
     }
 
-    const session = sessions.get(sessionId);
+    // Find session by PIN (search all active sessions)
+    let matchedSession = null;
+    let matchedSessionId = null;
 
-    if (!session) {
+    for (const [sessionId, session] of sessions.entries()) {
+      if (session.proctorPin === pin) {
+        matchedSession = session;
+        matchedSessionId = sessionId;
+        break;
+      }
+    }
+
+    if (!matchedSession) {
       return res.status(404).json({
         success: false,
-        message: 'Session not found or expired',
+        message: 'Invalid PIN or session expired',
       });
     }
 
-    if (session.proctorPin !== pin) {
-      return res.status(403).json({
-        success: false,
-        message: 'Invalid PIN',
-      });
-    }
-
-    session.proctorDeviceConnected = true;
+    matchedSession.proctorDeviceConnected = true;
 
     res.json({
       success: true,
       message: 'Proctor device connected',
+      sessionId: matchedSessionId, // Return session ID for recording purposes
       studentInfo: {
-        email: session.email,
-        studentId: session.studentId,
+        email: matchedSession.email,
+        studentId: matchedSession.studentId,
       },
     });
   } catch (error) {
