@@ -358,7 +358,27 @@ async function checkVideoQuality() {
         });
 
         if (faces && faces.length > 0) {
-          faceDetected.innerHTML = '<span style="color: #4caf50;">✓ Face Detected</span>';
+          // Check if face is fully visible (not cut off at edges)
+          const face = faces[0];
+          const box = face.box;
+          const videoWidth = previewVideo.videoWidth;
+          const videoHeight = previewVideo.videoHeight;
+
+          // Require 10% margin from all edges to ensure full face visibility
+          const marginX = videoWidth * 0.1;
+          const marginY = videoHeight * 0.1;
+
+          const isFaceFullyVisible =
+            box.xMin > marginX &&
+            box.xMax < (videoWidth - marginX) &&
+            box.yMin > marginY &&
+            box.yMax < (videoHeight - marginY);
+
+          if (isFaceFullyVisible) {
+            faceDetected.innerHTML = '<span style="color: #4caf50;">✓ Face Fully Visible</span>';
+          } else {
+            faceDetected.innerHTML = '<span style="color: #ff9800;">⚠ Face Cut Off - Center Your Face</span>';
+          }
         } else {
           faceDetected.innerHTML = '<span style="color: #ff9800;">⚠ No Face Detected</span>';
         }
@@ -508,7 +528,27 @@ async function startTestQualityMonitoring() {
         });
 
         if (faces && faces.length > 0) {
-          faceStatus.innerHTML = 'Face: <span style="color: #4caf50;">✓</span>';
+          // Check if face is fully visible (not cut off at edges)
+          const face = faces[0];
+          const box = face.box;
+          const videoWidth = mainVideo.videoWidth;
+          const videoHeight = mainVideo.videoHeight;
+
+          // Require 10% margin from all edges
+          const marginX = videoWidth * 0.1;
+          const marginY = videoHeight * 0.1;
+
+          const isFaceFullyVisible =
+            box.xMin > marginX &&
+            box.xMax < (videoWidth - marginX) &&
+            box.yMin > marginY &&
+            box.yMax < (videoHeight - marginY);
+
+          if (isFaceFullyVisible) {
+            faceStatus.innerHTML = 'Face: <span style="color: #4caf50;">✓</span>';
+          } else {
+            faceStatus.innerHTML = 'Face: <span style="color: #ff9800;">⚠ Cut Off</span>';
+          }
         } else {
           faceStatus.innerHTML = 'Face: <span style="color: #f44336;">⚠</span>';
         }
