@@ -23,6 +23,7 @@ app.post('/api/update-grade', require('./api/update-grade'));
 app.get('/api/tests', require('./api/get-tests'));
 app.get('/api/test-config', require('./api/get-test-config'));
 app.post('/api/save-test', require('./api/save-test'));
+app.post('/api/split-and-upload', require('./api/split-and-upload'));
 
 // Serve main app
 app.get('/', (req, res) => {
