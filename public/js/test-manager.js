@@ -104,11 +104,11 @@ function renderTestEditor() {
   container.innerHTML = `
     <div class="test-editor">
       <h2>${currentTest}</h2>
-      <p style="color: #666; margin-bottom: 20px;">Add Bunny.net URLs for each audio segment in order. Students will hear these segments sequentially during the test.</p>
+      <p style="color: #666; margin-bottom: 20px;">Configure audio segments for this test. You can fetch a full audio from Bunny.net and split it visually, or add segment URLs manually.</p>
 
       <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-        <button class="upload-split-btn" onclick="openAudioSplitter()">🎵 Upload & Split Audio</button>
-        <button class="add-segment-btn" onclick="addSegment()">+ Add Segment Manually</button>
+        <button class="upload-split-btn" onclick="openAudioSplitter()">🎵 Fetch & Split from Bunny.net</button>
+        <button class="add-segment-btn" onclick="addSegment()">+ Add Segment URL Manually</button>
       </div>
 
       <div id="audioSplitterContainer" style="display: none;"></div>
@@ -335,16 +335,36 @@ function openAudioSplitter() {
 
   container.innerHTML = `
     <div class="audio-splitter">
-      <h3>🎵 Upload & Split Audio</h3>
-      <p style="color: #666; margin-bottom: 15px;">Upload your full audio file, then click on the waveform to create segment markers.</p>
+      <h3>🎵 Fetch & Split Audio from Bunny.net</h3>
+      <p style="color: #666; margin-bottom: 15px;">
+        Paste the Bunny.net URL of your full audio file below. CIA will fetch it, show the waveform,
+        and let you visually split it into segments.
+      </p>
 
-      <div class="upload-area" id="uploadArea">
-        <input type="file" id="audioFileInput" accept="audio/*" style="display: none;" onchange="handleAudioUpload(event)">
-        <div class="upload-content" onclick="document.getElementById('audioFileInput').click()">
-          <div style="font-size: 48px; margin-bottom: 10px;">📁</div>
-          <div style="font-size: 16px; font-weight: 600; margin-bottom: 5px;">Click to upload audio</div>
-          <div style="font-size: 14px; color: #666;">Supports MP3, WAV, M4A, etc.</div>
+      <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+        <strong style="color: #1976d2;">💡 How it works:</strong>
+        <ol style="margin: 10px 0 0 20px; color: #1976d2; font-size: 14px; line-height: 1.8;">
+          <li>Upload your full audio to Bunny.net (via Bunny dashboard)</li>
+          <li>Copy the CDN URL (e.g., https://yourcdn.b-cdn.net/full-audio.mp3)</li>
+          <li>Paste it below and click "Load Audio"</li>
+          <li>Click on waveform to mark where segments should split</li>
+          <li>CIA splits and uploads segments back to Bunny.net automatically</li>
+        </ol>
+      </div>
+
+      <div class="upload-area" style="padding: 20px;">
+        <div style="margin-bottom: 15px;">
+          <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333;">Bunny.net Audio URL:</label>
+          <input
+            type="text"
+            id="bunnyAudioUrl"
+            placeholder="https://yourcdn.b-cdn.net/full-test-audio.mp3"
+            style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px;"
+          />
         </div>
+        <button onclick="loadAudioFromUrl()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); width: 100%;">
+          📥 Load Audio from Bunny.net
+        </button>
       </div>
 
       <div id="waveformContainer" style="display: none;">
@@ -393,34 +413,63 @@ function openAudioSplitter() {
   `;
 }
 
-async function handleAudioUpload(event) {
-  const file = event.target.files[0];
-  if (!file) return;
+async function loadAudioFromUrl() {
+  const urlInput = document.getElementById('bunnyAudioUrl');
+  const audioUrl = urlInput.value.trim();
 
-  audioFile = file;
-  document.getElementById('audioFileName').textContent = file.name;
-
-  // Initialize AudioContext
-  if (!audioContext) {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  if (!audioUrl) {
+    alert('Please enter a Bunny.net URL');
+    return;
   }
 
-  // Read file
-  const arrayBuffer = await file.arrayBuffer();
-  audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+  if (!audioUrl.startsWith('http')) {
+    alert('Please enter a valid URL starting with http:// or https://');
+    return;
+  }
 
-  // Show waveform container
-  document.getElementById('waveformContainer').style.display = 'block';
+  try {
+    // Show loading state
+    urlInput.disabled = true;
+    document.getElementById('audioFileName').textContent = 'Loading audio from Bunny.net...';
+    document.getElementById('waveformContainer').style.display = 'block';
 
-  // Draw waveform
-  drawWaveform();
+    // Initialize AudioContext
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
 
-  // Reset markers
-  markers = [];
-  updateMarkerInfo();
+    // Fetch audio from Bunny.net
+    const response = await fetch(audioUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch audio: ${response.statusText}`);
+    }
 
-  // Enable process button
-  document.getElementById('processBtn').disabled = false;
+    const arrayBuffer = await response.arrayBuffer();
+
+    // Store the URL instead of file object
+    audioFile = { url: audioUrl, name: audioUrl.split('/').pop() };
+
+    // Decode audio
+    audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+    // Update UI
+    document.getElementById('audioFileName').textContent = audioFile.name;
+
+    // Draw waveform
+    drawWaveform();
+
+    // Reset markers
+    markers = [];
+    updateMarkerInfo();
+
+    // Enable process button
+    document.getElementById('processBtn').disabled = false;
+  } catch (error) {
+    console.error('Error loading audio:', error);
+    alert('Failed to load audio from URL: ' + error.message + '\n\nMake sure:\n1. The URL is correct\n2. CORS is enabled on Bunny.net\n3. The file exists and is accessible');
+    urlInput.disabled = false;
+    document.getElementById('waveformContainer').style.display = 'none';
+  }
 }
 
 function drawWaveform() {
@@ -599,12 +648,13 @@ function clearAudioFile() {
   playbackOffset = 0;
 
   document.getElementById('waveformContainer').style.display = 'none';
-  document.getElementById('audioFileInput').value = '';
+  document.getElementById('bunnyAudioUrl').value = '';
+  document.getElementById('bunnyAudioUrl').disabled = false;
 }
 
 async function processAndUpload() {
   if (!audioFile || !audioBuffer) {
-    alert('Please upload an audio file first');
+    alert('Please load an audio file first');
     return;
   }
 
@@ -615,19 +665,19 @@ async function processAndUpload() {
 
   // Show processing status
   document.getElementById('processingStatus').style.display = 'block';
-  document.getElementById('processingMessage').textContent = 'Uploading and splitting audio...';
+  document.getElementById('processingMessage').textContent = 'Downloading from Bunny.net, splitting, and uploading segments...';
   document.getElementById('processBtn').disabled = true;
 
   try {
-    // Create FormData with audio file and markers
-    const formData = new FormData();
-    formData.append('audio', audioFile);
-    formData.append('testName', currentTest);
-    formData.append('markers', JSON.stringify(markers));
-
+    // Send URL and markers to backend
     const response = await fetch('/api/split-and-upload', {
       method: 'POST',
-      body: formData,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audioUrl: audioFile.url,
+        testName: currentTest,
+        markers: markers,
+      }),
     });
 
     const result = await response.json();

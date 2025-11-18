@@ -1,35 +1,57 @@
-const formidable = require('formidable');
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const { promisify } = require('util');
-const fetch = require('node-fetch');
+const https = require('https');
+const http = require('http');
 
 const execPromise = promisify(exec);
 
-module.exports = async (req, res) => {
-  const form = formidable({
-    uploadDir: path.join(__dirname, '../temp'),
-    keepExtensions: true,
-  });
+// Helper to download file from URL
+function downloadFile(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath);
+    const protocol = url.startsWith('https') ? https : http;
 
-  try {
-    // Parse the form data
-    const [fields, files] = await new Promise((resolve, reject) => {
-      form.parse(req, (err, fields, files) => {
-        if (err) reject(err);
-        else resolve([fields, files]);
+    protocol.get(url, (response) => {
+      if (response.statusCode !== 200) {
+        reject(new Error(`Failed to download: HTTP ${response.statusCode}`));
+        return;
+      }
+
+      response.pipe(file);
+
+      file.on('finish', () => {
+        file.close();
+        resolve();
       });
+
+      file.on('error', (err) => {
+        fs.unlink(destPath, () => {});
+        reject(err);
+      });
+    }).on('error', (err) => {
+      fs.unlink(destPath, () => {});
+      reject(err);
     });
+  });
+}
 
-    const audioFile = files.audio[0];
-    const testName = fields.testName[0];
-    const markers = JSON.parse(fields.markers[0]);
+module.exports = async (req, res) => {
+  try {
+    const { audioUrl, testName, markers } = req.body;
 
-    if (!audioFile) {
+    if (!audioUrl) {
       return res.status(400).json({
         success: false,
-        message: 'No audio file provided',
+        message: 'No audio URL provided',
+      });
+    }
+
+    if (!testName) {
+      return res.status(400).json({
+        success: false,
+        message: 'No test name provided',
       });
     }
 
@@ -49,6 +71,14 @@ module.exports = async (req, res) => {
       fs.mkdirSync(tempDir, { recursive: true });
     }
 
+    // Download audio file from Bunny.net
+    const audioFileName = audioUrl.split('/').pop() || 'audio.mp3';
+    const audioFilePath = path.join(tempDir, `download_${Date.now()}_${audioFileName}`);
+
+    console.log(`Downloading audio from ${audioUrl}...`);
+    await downloadFile(audioUrl, audioFilePath);
+    console.log(`Audio downloaded to ${audioFilePath}`);
+
     // Split audio into segments
     const segments = [];
     const segmentFiles = [];
@@ -65,10 +95,10 @@ module.exports = async (req, res) => {
       let ffmpegCmd;
       if (endTime === null) {
         // Last segment - no end time
-        ffmpegCmd = `ffmpeg -i "${audioFile.filepath}" -ss ${startTime} -acodec libmp3lame -ab 192k "${segmentPath}"`;
+        ffmpegCmd = `ffmpeg -i "${audioFilePath}" -ss ${startTime} -acodec libmp3lame -ab 192k "${segmentPath}"`;
       } else {
         const duration = endTime - startTime;
-        ffmpegCmd = `ffmpeg -i "${audioFile.filepath}" -ss ${startTime} -t ${duration} -acodec libmp3lame -ab 192k "${segmentPath}"`;
+        ffmpegCmd = `ffmpeg -i "${audioFilePath}" -ss ${startTime} -t ${duration} -acodec libmp3lame -ab 192k "${segmentPath}"`;
       }
 
       // Execute FFmpeg
@@ -94,11 +124,12 @@ module.exports = async (req, res) => {
     const bunnyCdnUrl = process.env.BUNNY_CDN_URL;
 
     if (!bunnyStorageZone || !bunnyApiKey || !bunnyCdnUrl) {
-      // If Bunny.net not configured, just return local temp URLs
+      // If Bunny.net not configured, clean up and return error
       console.warn('Bunny.net credentials not configured. Skipping upload.');
 
-      // Clean up original file
-      fs.unlinkSync(audioFile.filepath);
+      // Clean up downloaded file and segments
+      fs.unlinkSync(audioFilePath);
+      segmentFiles.forEach(file => fs.unlinkSync(file));
 
       return res.json({
         success: false,
@@ -108,24 +139,56 @@ module.exports = async (req, res) => {
 
     const segmentUrls = [];
 
+    // Upload each segment to Bunny.net
     for (const segment of segments) {
       const fileName = `cia/${testName}/segment_${segment.number}.mp3`;
       const fileData = fs.readFileSync(segment.path);
 
-      // Upload to Bunny.net Storage
+      // Upload to Bunny.net Storage using fetch (Node 18+) or https module
       const uploadUrl = `https://storage.bunnycdn.com/${bunnyStorageZone}/${fileName}`;
 
-      const uploadResponse = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: {
-          'AccessKey': bunnyApiKey,
-          'Content-Type': 'audio/mpeg',
-        },
-        body: fileData,
-      });
+      try {
+        // Try using built-in fetch if available (Node 18+)
+        if (typeof fetch !== 'undefined') {
+          const uploadResponse = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: {
+              'AccessKey': bunnyApiKey,
+              'Content-Type': 'audio/mpeg',
+            },
+            body: fileData,
+          });
 
-      if (!uploadResponse.ok) {
-        throw new Error(`Failed to upload segment ${segment.number} to Bunny.net: ${uploadResponse.statusText}`);
+          if (!uploadResponse.ok) {
+            throw new Error(`HTTP ${uploadResponse.status}: ${uploadResponse.statusText}`);
+          }
+        } else {
+          // Fallback to https module
+          await new Promise((resolve, reject) => {
+            const options = {
+              method: 'PUT',
+              headers: {
+                'AccessKey': bunnyApiKey,
+                'Content-Type': 'audio/mpeg',
+                'Content-Length': fileData.length,
+              },
+            };
+
+            const req = https.request(uploadUrl, options, (res) => {
+              if (res.statusCode >= 200 && res.statusCode < 300) {
+                resolve();
+              } else {
+                reject(new Error(`HTTP ${res.statusCode}`));
+              }
+            });
+
+            req.on('error', reject);
+            req.write(fileData);
+            req.end();
+          });
+        }
+      } catch (error) {
+        throw new Error(`Failed to upload segment ${segment.number} to Bunny.net: ${error.message}`);
       }
 
       // Construct CDN URL
@@ -136,8 +199,8 @@ module.exports = async (req, res) => {
       fs.unlinkSync(segment.path);
     }
 
-    // Clean up original file
-    fs.unlinkSync(audioFile.filepath);
+    // Clean up downloaded audio file
+    fs.unlinkSync(audioFilePath);
 
     res.json({
       success: true,
