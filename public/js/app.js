@@ -352,10 +352,11 @@ function checkVideoQuality() {
       warningDiv.style.display = 'block';
     }
 
-    // Simple face detection using brightness variance in face region
+    // Face detection - check upper 2/3 of frame where faces typically are
+    // This allows face to be anywhere in frame, not just centered
     const faceRegion = ctx.getImageData(
-      canvas.width * 0.25, canvas.height * 0.15,
-      canvas.width * 0.5, canvas.height * 0.5
+      0, 0,
+      canvas.width, Math.floor(canvas.height * 0.67)
     );
     const faceData = faceRegion.data;
     let faceVariance = 0;
@@ -375,9 +376,9 @@ function checkVideoQuality() {
     faceVariance /= (faceData.length / 4);
 
     const faceDetected = document.getElementById('faceDetected');
-    // Increased threshold from 20 to 35 for more accurate face detection
-    // Also check that brightness isn't too extreme (not a blank white/black screen)
-    if (faceVariance > 35 && faceBrightness > 30 && faceBrightness < 230) {
+    // Check for variance (detail) and reasonable brightness (not blank screen)
+    // Threshold of 25 is balanced - rejects blank walls but accepts faces at various positions
+    if (faceVariance > 25 && faceBrightness > 30 && faceBrightness < 230) {
       faceDetected.innerHTML = '<span style="color: #4caf50;">✓ Face Visible</span>';
     } else {
       faceDetected.innerHTML = '<span style="color: #ff9800;">⚠ No Face Detected</span>';
@@ -477,10 +478,10 @@ function startTestQualityMonitoring() {
       lightingStatus.innerHTML = 'Lighting: <span style="color: #f44336;">⚠</span>';
     }
 
-    // Check face presence
+    // Check face presence - upper 2/3 of frame (matches setup page logic)
     const faceRegion = ctx.getImageData(
-      canvas.width * 0.25, canvas.height * 0.15,
-      canvas.width * 0.5, canvas.height * 0.5
+      0, 0,
+      canvas.width, Math.floor(canvas.height * 0.67)
     );
     const faceData = faceRegion.data;
     let faceVariance = 0;
@@ -498,8 +499,8 @@ function startTestQualityMonitoring() {
     }
     faceVariance /= (faceData.length / 4);
 
-    // Use same strict face detection as setup page
-    if (faceVariance > 35 && faceBrightness > 30 && faceBrightness < 230) {
+    // Use same balanced detection as setup page
+    if (faceVariance > 25 && faceBrightness > 30 && faceBrightness < 230) {
       faceStatus.innerHTML = 'Face: <span style="color: #4caf50;">✓</span>';
     } else {
       faceStatus.innerHTML = 'Face: <span style="color: #f44336;">⚠</span>';
