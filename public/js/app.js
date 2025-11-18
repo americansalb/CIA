@@ -152,19 +152,44 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
 
 // Show proctor setup when moving to page 3
 function setupProctorPage() {
-  if (!sessionData) return;
+  if (!sessionData) {
+    console.error('No session data available');
+    return;
+  }
 
   // Generate QR code
   const proctorFullUrl = `${window.location.origin}/proctor?session=${sessionData.sessionId}&pin=${sessionData.proctorPin}`;
 
-  QRCode.toCanvas(
-    document.getElementById('qrcode'),
-    proctorFullUrl,
-    { width: 300 },
-    (error) => {
-      if (error) console.error('QR code generation error:', error);
-    }
-  );
+  console.log('Setting up proctor page with URL:', proctorFullUrl);
+
+  // Check if QRCode library is loaded
+  if (typeof QRCode === 'undefined') {
+    console.error('QRCode library not loaded');
+    document.getElementById('qrcode').insertAdjacentHTML('afterend', '<p style="color: red;">QR Code library failed to load. Please use the PIN method below.</p>');
+    document.getElementById('pinDisplay').textContent = sessionData.proctorPin;
+    document.getElementById('proctorUrl').textContent = `${window.location.origin}/proctor`;
+    checkProctorConnection();
+    return;
+  }
+
+  // Generate QR code
+  try {
+    QRCode.toCanvas(
+      document.getElementById('qrcode'),
+      proctorFullUrl,
+      { width: 300, margin: 2 },
+      (error) => {
+        if (error) {
+          console.error('QR code generation error:', error);
+          document.getElementById('qrcode').insertAdjacentHTML('afterend', '<p style="color: red;">QR Code generation failed. Please use the PIN method below.</p>');
+        } else {
+          console.log('QR code generated successfully');
+        }
+      }
+    );
+  } catch (error) {
+    console.error('QR code exception:', error);
+  }
 
   // Display PIN and URL
   document.getElementById('pinDisplay').textContent = sessionData.proctorPin;
@@ -300,7 +325,7 @@ function checkVideoQuality() {
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
 
-    // Check lighting (average brightness)
+    // Check lighting (average brightness) - wider range for less sensitivity
     let totalBrightness = 0;
     for (let i = 0; i < data.length; i += 4) {
       const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
@@ -309,16 +334,22 @@ function checkVideoQuality() {
     const avgBrightness = totalBrightness / (data.length / 4);
 
     const lightingLevel = document.getElementById('lightingLevel');
-    if (avgBrightness > 100 && avgBrightness < 200) {
+    const warningDiv = document.getElementById('qualityWarning');
+
+    if (avgBrightness > 70 && avgBrightness < 220) {
       lightingLevel.innerHTML = '<span style="color: #4caf50;">✓ Good</span>';
-    } else if (avgBrightness <= 100) {
+      // Clear warning if it was about lighting
+      if (warningDiv.textContent.includes('Lighting')) {
+        warningDiv.style.display = 'none';
+      }
+    } else if (avgBrightness <= 70) {
       lightingLevel.innerHTML = '<span style="color: #ff9800;">⚠ Too Dark</span>';
-      document.getElementById('qualityWarning').textContent = 'Lighting is too dark. Please improve lighting.';
-      document.getElementById('qualityWarning').style.display = 'block';
+      warningDiv.textContent = 'Lighting is too dark. Please improve lighting.';
+      warningDiv.style.display = 'block';
     } else {
       lightingLevel.innerHTML = '<span style="color: #ff9800;">⚠ Too Bright</span>';
-      document.getElementById('qualityWarning').textContent = 'Lighting is too bright. Please adjust lighting.';
-      document.getElementById('qualityWarning').style.display = 'block';
+      warningDiv.textContent = 'Lighting is too bright. Please adjust lighting.';
+      warningDiv.style.display = 'block';
     }
 
     // Simple face detection using brightness variance in face region
@@ -354,18 +385,18 @@ function checkVideoQuality() {
   }, 1000);
 }
 
-// Check if all quality checks pass
+// Check if all quality checks pass (but keep monitoring continuously)
 function checkIfReadyToContinue() {
   const faceDetected = document.getElementById('faceDetected').textContent.includes('✓');
   const lightingGood = document.getElementById('lightingLevel').textContent.includes('✓');
   const micWorking = document.getElementById('micStatus').textContent.includes('✓');
 
-  if (faceDetected && lightingGood && micWorking) {
-    document.getElementById('continueToProctorBtn').disabled = false;
-    if (qualityCheckInterval) {
-      clearInterval(qualityCheckInterval);
-    }
+  // Enable continue button when all checks pass, but keep monitoring
+  const continueBtn = document.getElementById('continueToProctorBtn');
+  if (continueBtn) {
+    continueBtn.disabled = !(faceDetected && lightingGood && micWorking);
   }
+  // Note: Don't clear the interval - keep monitoring continuously
 }
 
 // Start test - triggered when clicking Continue from proctor page (page3 -> page5)
@@ -392,6 +423,9 @@ showPage = async function(pageId) {
       // Note: Proctor recorder will be managed by the proctor device
       document.getElementById('proctorVideo').srcObject = null; // Will be handled separately
 
+      // Start continuous quality monitoring during test
+      startTestQualityMonitoring();
+
       // Start test timer
       testStartTime = Date.now();
       startTestTimer();
@@ -401,6 +435,74 @@ showPage = async function(pageId) {
     }
   }
 };
+
+// Continue quality monitoring during the test
+let testQualityInterval;
+function startTestQualityMonitoring() {
+  const mainVideo = document.getElementById('mainVideo');
+  const monitorDiv = document.getElementById('testQualityMonitor');
+  const faceStatus = document.getElementById('testFaceStatus');
+  const lightingStatus = document.getElementById('testLightingStatus');
+
+  if (!mainVideo || !monitorDiv) return;
+
+  monitorDiv.style.display = 'block';
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  testQualityInterval = setInterval(() => {
+    if (mainVideo.videoWidth === 0) return;
+
+    canvas.width = mainVideo.videoWidth;
+    canvas.height = mainVideo.videoHeight;
+    ctx.drawImage(mainVideo, 0, 0, canvas.width, canvas.height);
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+
+    // Check lighting
+    let totalBrightness = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+      totalBrightness += brightness;
+    }
+    const avgBrightness = totalBrightness / (data.length / 4);
+
+    if (avgBrightness > 70 && avgBrightness < 220) {
+      lightingStatus.innerHTML = 'Lighting: <span style="color: #4caf50;">✓</span>';
+    } else {
+      lightingStatus.innerHTML = 'Lighting: <span style="color: #f44336;">⚠</span>';
+    }
+
+    // Check face presence
+    const faceRegion = ctx.getImageData(
+      canvas.width * 0.25, canvas.height * 0.15,
+      canvas.width * 0.5, canvas.height * 0.5
+    );
+    const faceData = faceRegion.data;
+    let faceVariance = 0;
+    let faceBrightness = 0;
+
+    for (let i = 0; i < faceData.length; i += 4) {
+      const brightness = (faceData[i] + faceData[i + 1] + faceData[i + 2]) / 3;
+      faceBrightness += brightness;
+    }
+    faceBrightness /= (faceData.length / 4);
+
+    for (let i = 0; i < faceData.length; i += 4) {
+      const brightness = (faceData[i] + faceData[i + 1] + faceData[i + 2]) / 3;
+      faceVariance += Math.abs(brightness - faceBrightness);
+    }
+    faceVariance /= (faceData.length / 4);
+
+    if (faceVariance > 20) {
+      faceStatus.innerHTML = 'Face: <span style="color: #4caf50;">✓</span>';
+    } else {
+      faceStatus.innerHTML = 'Face: <span style="color: #f44336;">⚠</span>';
+    }
+  }, 2000); // Check every 2 seconds during test
+}
 
 // Test timer
 function startTestTimer() {
