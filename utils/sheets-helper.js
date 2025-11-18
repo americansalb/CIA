@@ -189,6 +189,11 @@ async function saveTestSegments(testName, segments) {
       existingRows = response.data.values || [];
     } catch (error) {
       // Sheet doesn't exist, will create with headers
+      existingRows = [];
+    }
+
+    // Ensure headers exist (if sheet is empty or doesn't have headers)
+    if (existingRows.length === 0) {
       existingRows = [['Test_Name', 'Segment_Number', 'Audio_URL', 'Status']];
     }
 
