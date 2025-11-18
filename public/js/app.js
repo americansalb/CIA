@@ -162,38 +162,38 @@ function setupProctorPage() {
 
   console.log('Setting up proctor page with URL:', proctorFullUrl);
 
-  // Check if QRCode library is loaded
-  if (typeof QRCode === 'undefined') {
-    console.error('QRCode library not loaded');
-    document.getElementById('qrcode').insertAdjacentHTML('afterend', '<p style="color: red;">QR Code library failed to load. Please use the PIN method below.</p>');
-    document.getElementById('pinDisplay').textContent = sessionData.proctorPin;
-    document.getElementById('proctorUrl').textContent = `${window.location.origin}/proctor`;
-    checkProctorConnection();
-    return;
-  }
-
-  // Generate QR code
-  try {
-    QRCode.toCanvas(
-      document.getElementById('qrcode'),
-      proctorFullUrl,
-      { width: 300, margin: 2 },
-      (error) => {
-        if (error) {
-          console.error('QR code generation error:', error);
-          document.getElementById('qrcode').insertAdjacentHTML('afterend', '<p style="color: red;">QR Code generation failed. Please use the PIN method below.</p>');
-        } else {
-          console.log('QR code generated successfully');
-        }
-      }
-    );
-  } catch (error) {
-    console.error('QR code exception:', error);
-  }
-
-  // Display PIN and URL
+  // Display PIN and URL (primary method - always works)
   document.getElementById('pinDisplay').textContent = sessionData.proctorPin;
   document.getElementById('proctorUrl').textContent = `${window.location.origin}/proctor`;
+
+  // Try to generate QR code (optional enhancement)
+  if (typeof QRCode !== 'undefined') {
+    try {
+      const qrContainer = document.querySelector('.qr-container');
+      QRCode.toCanvas(
+        document.getElementById('qrcode'),
+        proctorFullUrl,
+        { width: 250, margin: 2 },
+        (error) => {
+          if (error) {
+            console.error('QR code generation error:', error);
+            const errorEl = document.getElementById('qrCodeError');
+            if (errorEl) {
+              errorEl.textContent = 'QR code unavailable - use PIN method above';
+              errorEl.style.display = 'block';
+            }
+          } else {
+            console.log('QR code generated successfully');
+            if (qrContainer) qrContainer.style.display = 'block'; // Show QR code if successful
+          }
+        }
+      );
+    } catch (error) {
+      console.error('QR code exception:', error);
+    }
+  } else {
+    console.warn('QRCode library not loaded - PIN method will be used');
+  }
 
   // Poll for proctor connection
   checkProctorConnection();
@@ -375,7 +375,9 @@ function checkVideoQuality() {
     faceVariance /= (faceData.length / 4);
 
     const faceDetected = document.getElementById('faceDetected');
-    if (faceVariance > 20) {
+    // Increased threshold from 20 to 35 for more accurate face detection
+    // Also check that brightness isn't too extreme (not a blank white/black screen)
+    if (faceVariance > 35 && faceBrightness > 30 && faceBrightness < 230) {
       faceDetected.innerHTML = '<span style="color: #4caf50;">✓ Face Visible</span>';
     } else {
       faceDetected.innerHTML = '<span style="color: #ff9800;">⚠ No Face Detected</span>';
@@ -496,7 +498,8 @@ function startTestQualityMonitoring() {
     }
     faceVariance /= (faceData.length / 4);
 
-    if (faceVariance > 20) {
+    // Use same strict face detection as setup page
+    if (faceVariance > 35 && faceBrightness > 30 && faceBrightness < 230) {
       faceStatus.innerHTML = 'Face: <span style="color: #4caf50;">✓</span>';
     } else {
       faceStatus.innerHTML = 'Face: <span style="color: #f44336;">⚠</span>';

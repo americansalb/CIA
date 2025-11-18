@@ -121,21 +121,36 @@
     <!-- Page 3: Proctor Setup (MOVED AFTER CAMERA) -->
     <div id="page3" class="page">
       <h1>Set Up Proctoring Device</h1>
-      <p>Please use your second device to join as a proctor. Use EITHER the QR code OR the PIN below.</p>
+      <p>Please use your second device (phone/tablet) to join as a proctor camera.</p>
 
-      <div class="qr-container">
-        <h2>Scan this QR Code:</h2>
-        <canvas id="qrcode"></canvas>
+      <div style="background: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h2 style="margin-top: 0; color: #1976d2;">📱 Connect Your Second Device:</h2>
+
+        <div style="margin: 20px 0;">
+          <strong>Step 1:</strong> On your phone/tablet, open browser and go to:
+          <div style="background: white; padding: 15px; margin: 10px 0; border-radius: 6px; font-size: 18px; font-weight: bold; text-align: center;">
+            <span id="proctorUrl">Loading...</span>
+          </div>
+        </div>
+
+        <div style="margin: 20px 0;">
+          <strong>Step 2:</strong> Enter this PIN when prompted:
+          <div class="pin-code" id="pinDisplay" style="font-size: 48px; background: white; padding: 20px; margin: 10px 0; border-radius: 6px; text-align: center; letter-spacing: 8px;">------</div>
+        </div>
+
+        <div style="margin: 20px 0; padding: 15px; background: #fff3cd; border-radius: 6px; border-left: 4px solid #ffc107;">
+          <strong>⚠️ Important:</strong> Keep both devices positioned throughout the test - one showing your face, one showing your workspace/hands.
+        </div>
       </div>
 
-      <div class="pin-display">
-        <h2>Or enter this PIN on your proctor device:</h2>
-        <div class="pin-code" id="pinDisplay">------</div>
-        <p style="margin-top: 10px; color: #666;">Visit: <strong id="proctorUrl">Loading...</strong></p>
+      <div class="qr-container" style="display: none;">
+        <h3>Or scan QR Code:</h3>
+        <canvas id="qrcode"></canvas>
+        <p id="qrCodeError" style="color: #c33; display: none;"></p>
       </div>
 
       <div id="waitingStatus" class="status-waiting">
-        Waiting for proctor device to connect...
+        ⏳ Waiting for proctor device to connect...
       </div>
 
       <div id="readyStatus" class="status-ready" style="display: none;">
