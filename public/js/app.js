@@ -364,9 +364,18 @@ async function checkVideoQuality() {
           const videoWidth = previewVideo.videoWidth;
           const videoHeight = previewVideo.videoHeight;
 
-          // Require 5% margin from all edges to ensure full face visibility
-          const marginX = videoWidth * 0.05;
-          const marginY = videoHeight * 0.05;
+          // Debug: log face position
+          const margins = {
+            left: box.xMin,
+            right: videoWidth - box.xMax,
+            top: box.yMin,
+            bottom: videoHeight - box.yMax
+          };
+          console.log('Face margins from edges (px):', margins);
+
+          // Very minimal margin (2%) - only catches actual cutoffs at frame edges
+          const marginX = videoWidth * 0.02;
+          const marginY = videoHeight * 0.02;
 
           const isFaceFullyVisible =
             box.xMin > marginX &&
@@ -377,7 +386,13 @@ async function checkVideoQuality() {
           if (isFaceFullyVisible) {
             faceDetected.innerHTML = '<span style="color: #4caf50;">✓ Face Fully Visible</span>';
           } else {
-            faceDetected.innerHTML = '<span style="color: #ff9800;">⚠ Face Cut Off - Center Your Face</span>';
+            // Show which edge is the problem
+            const issues = [];
+            if (box.xMin <= marginX) issues.push('left');
+            if (box.xMax >= (videoWidth - marginX)) issues.push('right');
+            if (box.yMin <= marginY) issues.push('top');
+            if (box.yMax >= (videoHeight - marginY)) issues.push('bottom');
+            faceDetected.innerHTML = `<span style="color: #ff9800;">⚠ Too close to ${issues.join(', ')} edge</span>`;
           }
         } else {
           faceDetected.innerHTML = '<span style="color: #ff9800;">⚠ No Face Detected</span>';
@@ -534,9 +549,9 @@ async function startTestQualityMonitoring() {
           const videoWidth = mainVideo.videoWidth;
           const videoHeight = mainVideo.videoHeight;
 
-          // Require 5% margin from all edges
-          const marginX = videoWidth * 0.05;
-          const marginY = videoHeight * 0.05;
+          // Very minimal margin (2%) - only catches actual cutoffs
+          const marginX = videoWidth * 0.02;
+          const marginY = videoHeight * 0.02;
 
           const isFaceFullyVisible =
             box.xMin > marginX &&
