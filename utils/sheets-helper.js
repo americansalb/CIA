@@ -73,60 +73,63 @@ async function validateAdmin(email, password) {
 async function getAllTests() {
   try {
     const sheets = await getSheets();
+    const allTests = new Set();
 
-    // Get all unique tests from Students sheet
-    const studentsRange = process.env.STUDENTS_SHEET_RANGE || 'Students!A:D';
-    const studentsResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: studentsRange,
-    });
-
-    const studentRows = studentsResponse.data.values || [];
-    const uniqueTests = new Set();
-
-    // Skip header, get unique test names
-    for (let i = 1; i < studentRows.length; i++) {
-      const [, , permittedTest] = studentRows[i];
-      if (permittedTest) {
-        uniqueTests.add(permittedTest);
-      }
-    }
-
-    // Get configured tests from Tests sheet
+    // Get configured tests from Tests sheet FIRST (primary source of truth)
     const testsRange = process.env.TESTS_SHEET_RANGE || 'Tests!A:D';
-    let testsResponse;
+    const testConfigs = {};
+
     try {
-      testsResponse = await sheets.spreadsheets.values.get({
+      const testsResponse = await sheets.spreadsheets.values.get({
         spreadsheetId: process.env.GOOGLE_SHEET_ID,
         range: testsRange,
       });
+
+      const testRows = testsResponse.data.values || [];
+
+      // Parse test configurations
+      for (let i = 1; i < testRows.length; i++) {
+        const [testName, segmentNum, audioUrl, status] = testRows[i];
+        if (testName) {
+          allTests.add(testName);
+          if (!testConfigs[testName]) {
+            testConfigs[testName] = [];
+          }
+          testConfigs[testName].push({
+            segmentNumber: parseInt(segmentNum),
+            audioUrl,
+            status: status || 'active',
+          });
+        }
+      }
     } catch (error) {
       // Tests sheet doesn't exist yet
-      return Array.from(uniqueTests).map(name => ({
-        name,
-        configured: false,
-        segmentCount: 0,
-      }));
+      console.log('Tests sheet not found, checking Students sheet only');
     }
 
-    const testRows = testsResponse.data.values || [];
-    const testConfigs = {};
-
-    // Parse test configurations
-    for (let i = 1; i < testRows.length; i++) {
-      const [testName, segmentNum, audioUrl, status] = testRows[i];
-      if (!testConfigs[testName]) {
-        testConfigs[testName] = [];
-      }
-      testConfigs[testName].push({
-        segmentNumber: parseInt(segmentNum),
-        audioUrl,
-        status: status || 'active',
+    // Also get tests from Students sheet (tests that are assigned but maybe not configured yet)
+    const studentsRange = process.env.STUDENTS_SHEET_RANGE || 'Students!A:D';
+    try {
+      const studentsResponse = await sheets.spreadsheets.values.get({
+        spreadsheetId: process.env.GOOGLE_SHEET_ID,
+        range: studentsRange,
       });
+
+      const studentRows = studentsResponse.data.values || [];
+
+      // Skip header, get unique test names
+      for (let i = 1; i < studentRows.length; i++) {
+        const [, , permittedTest] = studentRows[i];
+        if (permittedTest) {
+          allTests.add(permittedTest);
+        }
+      }
+    } catch (error) {
+      console.log('Students sheet not found');
     }
 
-    // Combine unique tests with their configs
-    return Array.from(uniqueTests).map(name => ({
+    // Return all tests (configured and unassigned)
+    return Array.from(allTests).map(name => ({
       name,
       configured: !!testConfigs[name],
       segmentCount: testConfigs[name]?.length || 0,
