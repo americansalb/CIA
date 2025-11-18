@@ -103,7 +103,7 @@
       </div>
 
       <div id="qualityChecks" style="text-align: center; margin: 20px 0; display: none;">
-        <p id="faceStatus" style="color: #666;">Video Activity: <span id="faceDetected">Checking...</span></p>
+        <p id="faceStatus" style="color: #666;">Face Detection: <span id="faceDetected">Checking...</span></p>
         <p id="lightingStatus" style="color: #666;">Lighting: <span id="lightingLevel">Checking...</span></p>
         <p id="resolutionStatus" style="color: #666;">Resolution: <span id="resolutionCheck">Checking...</span></p>
       </div>
@@ -315,7 +315,14 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
-  <script src="/js/app.js"></script>
+
+  <!-- TensorFlow.js and Face Detection -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.11.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.11.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.11.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection@1.0.2"></script>
+
   <script src="/js/recording.js"></script>
+  <script src="/js/app.js"></script>
 </body>
 </html>

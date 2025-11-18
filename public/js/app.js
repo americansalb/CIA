@@ -280,10 +280,32 @@ async function requestPermissions() {
   }
 }
 
-// Check video quality (lighting and motion detection)
+// Check video quality (lighting and face detection)
 let qualityCheckInterval;
-let previousFrameData = null;
-function checkVideoQuality() {
+let faceDetector = null;
+
+// Initialize face detector
+async function initFaceDetector() {
+  if (!faceDetector && window.faceDetection) {
+    try {
+      console.log('Loading MediaPipe Face Detector...');
+      const model = faceDetection.SupportedModels.MediaPipeFaceDetector;
+      const detectorConfig = {
+        runtime: 'tfjs',
+        maxFaces: 2,
+        modelType: 'short', // 'short' for speed, 'full' for better accuracy
+      };
+      faceDetector = await faceDetection.createDetector(model, detectorConfig);
+      console.log('Face detector loaded successfully');
+    } catch (error) {
+      console.error('Failed to load face detector:', error);
+      faceDetector = null;
+    }
+  }
+  return faceDetector;
+}
+
+async function checkVideoQuality() {
   const previewVideo = document.getElementById('previewVideo');
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
@@ -291,7 +313,10 @@ function checkVideoQuality() {
   canvas.width = previewVideo.videoWidth;
   canvas.height = previewVideo.videoHeight;
 
-  qualityCheckInterval = setInterval(() => {
+  // Initialize face detector
+  await initFaceDetector();
+
+  qualityCheckInterval = setInterval(async () => {
     ctx.drawImage(previewVideo, 0, 0, canvas.width, canvas.height);
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
@@ -323,53 +348,42 @@ function checkVideoQuality() {
       warningDiv.style.display = 'block';
     }
 
-    // Motion/Activity detection - more reliable than face detection
-    // Checks if video stream is live and changing (not frozen)
+    // Real face detection using TensorFlow.js
     const faceDetected = document.getElementById('faceDetected');
 
-    if (previousFrameData) {
-      // Compare current frame to previous frame
-      let totalDifference = 0;
-      const sampleRate = 100; // Sample every 100th pixel for performance
+    if (faceDetector) {
+      try {
+        const faces = await faceDetector.estimateFaces(previewVideo, {
+          flipHorizontal: false,
+        });
 
-      for (let i = 0; i < data.length; i += 4 * sampleRate) {
-        const currentBrightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
-        const previousBrightness = (previousFrameData[i] + previousFrameData[i + 1] + previousFrameData[i + 2]) / 3;
-        totalDifference += Math.abs(currentBrightness - previousBrightness);
-      }
-
-      const avgDifference = totalDifference / (data.length / (4 * sampleRate));
-
-      // If there's motion/change between frames, video is active
-      // This is advisory only - doesn't block, just informs
-      if (avgDifference > 2) {
-        faceDetected.innerHTML = '<span style="color: #4caf50;">✓ Video Active</span>';
-      } else {
-        // Low movement doesn't necessarily mean problem - could be sitting still
-        faceDetected.innerHTML = '<span style="color: #2196f3;">ℹ️ Video Live</span>';
+        if (faces && faces.length > 0) {
+          faceDetected.innerHTML = '<span style="color: #4caf50;">✓ Face Detected</span>';
+        } else {
+          faceDetected.innerHTML = '<span style="color: #ff9800;">⚠ No Face Detected</span>';
+        }
+      } catch (error) {
+        console.error('Face detection error:', error);
+        faceDetected.innerHTML = '<span style="color: #999;">⚠ Detection Error</span>';
       }
     } else {
-      faceDetected.innerHTML = '<span style="color: #2196f3;">ℹ️ Checking...</span>';
+      faceDetected.innerHTML = '<span style="color: #2196f3;">ℹ️ Loading detector...</span>';
     }
 
-    // Store current frame for next comparison
-    previousFrameData = new Uint8ClampedArray(data);
-
     checkIfReadyToContinue();
-  }, 1000);
+  }, 1500); // Check every 1.5 seconds (face detection is more expensive)
 }
 
 // Check if all quality checks pass (but keep monitoring continuously)
 function checkIfReadyToContinue() {
-  // Video activity check is now advisory only (not required to continue)
+  const faceDetected = document.getElementById('faceDetected').textContent.includes('✓');
   const lightingGood = document.getElementById('lightingLevel').textContent.includes('✓');
   const micWorking = document.getElementById('micStatus').textContent.includes('✓');
 
-  // Enable continue button when lighting and mic are good
-  // Video activity check is informational only
+  // Enable continue button when all checks pass
   const continueBtn = document.getElementById('continueToProctorBtn');
   if (continueBtn) {
-    continueBtn.disabled = !(lightingGood && micWorking);
+    continueBtn.disabled = !(faceDetected && lightingGood && micWorking);
   }
   // Note: Don't clear the interval - keep monitoring continuously
 }
@@ -446,8 +460,7 @@ showPage = async function(pageId) {
 
 // Continue quality monitoring during the test
 let testQualityInterval;
-let testPreviousFrameData = null;
-function startTestQualityMonitoring() {
+async function startTestQualityMonitoring() {
   const mainVideo = document.getElementById('mainVideo');
   const monitorDiv = document.getElementById('testQualityMonitor');
   const faceStatus = document.getElementById('testFaceStatus');
@@ -457,10 +470,13 @@ function startTestQualityMonitoring() {
 
   monitorDiv.style.display = 'block';
 
+  // Initialize face detector if not already done
+  await initFaceDetector();
+
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
 
-  testQualityInterval = setInterval(() => {
+  testQualityInterval = setInterval(async () => {
     if (mainVideo.videoWidth === 0) return;
 
     canvas.width = mainVideo.videoWidth;
@@ -484,28 +500,24 @@ function startTestQualityMonitoring() {
       lightingStatus.innerHTML = 'Lighting: <span style="color: #f44336;">⚠</span>';
     }
 
-    // Motion/Activity detection (same as setup page - advisory only)
-    if (testPreviousFrameData) {
-      let totalDifference = 0;
-      const sampleRate = 100;
+    // Real face detection during test (same as setup)
+    if (faceDetector) {
+      try {
+        const faces = await faceDetector.estimateFaces(mainVideo, {
+          flipHorizontal: false,
+        });
 
-      for (let i = 0; i < data.length; i += 4 * sampleRate) {
-        const currentBrightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
-        const previousBrightness = (testPreviousFrameData[i] + testPreviousFrameData[i + 1] + testPreviousFrameData[i + 2]) / 3;
-        totalDifference += Math.abs(currentBrightness - previousBrightness);
-      }
-
-      const avgDifference = totalDifference / (data.length / (4 * sampleRate));
-
-      if (avgDifference > 2) {
-        faceStatus.innerHTML = 'Video: <span style="color: #4caf50;">✓</span>';
-      } else {
-        faceStatus.innerHTML = 'Video: <span style="color: #2196f3;">ℹ️</span>';
+        if (faces && faces.length > 0) {
+          faceStatus.innerHTML = 'Face: <span style="color: #4caf50;">✓</span>';
+        } else {
+          faceStatus.innerHTML = 'Face: <span style="color: #f44336;">⚠</span>';
+        }
+      } catch (error) {
+        console.error('Test face detection error:', error);
+        faceStatus.innerHTML = 'Face: <span style="color: #999;">⚠</span>';
       }
     }
-
-    testPreviousFrameData = new Uint8ClampedArray(data);
-  }, 2000); // Check every 2 seconds during test
+  }, 2500); // Check every 2.5 seconds during test
 }
 
 // Audio input visualization
