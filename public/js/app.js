@@ -364,12 +364,17 @@ async function checkVideoQuality() {
           const videoWidth = previewVideo.videoWidth;
           const videoHeight = previewVideo.videoHeight;
 
+          // MediaPipe Face Detector provides: xMin, yMin, width, height
+          // Calculate xMax and yMax from these values
+          const xMax = box.xMin + box.width;
+          const yMax = box.yMin + box.height;
+
           // Debug: log face position
           const margins = {
             left: box.xMin,
-            right: videoWidth - box.xMax,
+            right: videoWidth - xMax,
             top: box.yMin,
-            bottom: videoHeight - box.yMax
+            bottom: videoHeight - yMax
           };
           console.log('Face margins from edges (px):', margins);
 
@@ -379,9 +384,9 @@ async function checkVideoQuality() {
 
           const isFaceFullyVisible =
             box.xMin > marginX &&
-            box.xMax < (videoWidth - marginX) &&
+            xMax < (videoWidth - marginX) &&
             box.yMin > marginY &&
-            box.yMax < (videoHeight - marginY);
+            yMax < (videoHeight - marginY);
 
           if (isFaceFullyVisible) {
             faceDetected.innerHTML = '<span style="color: #4caf50;">✓ Face Fully Visible</span>';
@@ -389,9 +394,9 @@ async function checkVideoQuality() {
             // Show which edge is the problem
             const issues = [];
             if (box.xMin <= marginX) issues.push('left');
-            if (box.xMax >= (videoWidth - marginX)) issues.push('right');
+            if (xMax >= (videoWidth - marginX)) issues.push('right');
             if (box.yMin <= marginY) issues.push('top');
-            if (box.yMax >= (videoHeight - marginY)) issues.push('bottom');
+            if (yMax >= (videoHeight - marginY)) issues.push('bottom');
             faceDetected.innerHTML = `<span style="color: #ff9800;">⚠ Too close to ${issues.join(', ')} edge</span>`;
           }
         } else {
