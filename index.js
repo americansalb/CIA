@@ -17,6 +17,7 @@ app.post('/api/upload-chunk', require('./api/upload-chunk'));
 app.post('/api/upload-final', require('./api/upload-final'));
 app.post('/api/create-session', require('./api/create-session'));
 app.post('/api/join-proctor', require('./api/join-proctor'));
+app.post('/api/confirm-proctor', require('./api/confirm-proctor'));
 app.get('/api/session-status/:sessionId', require('./api/session-status'));
 app.get('/api/recordings', require('./api/get-recordings'));
 app.post('/api/update-grade', require('./api/update-grade'));

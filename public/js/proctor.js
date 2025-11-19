@@ -173,7 +173,14 @@ async function startProctorRecording() {
     proctorRecorder = new RecordingManager('proctor', proctorSessionData.sessionId);
     await proctorRecorder.startRecording(proctorStream);
 
-    console.log('Proctor recording started');
+    // CRITICAL: Notify main device that proctor is NOW actually recording
+    await fetch('/api/confirm-proctor', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: proctorSessionData.sessionId }),
+    });
+
+    console.log('Proctor recording started and confirmed');
 
     // Poll for main device completion
     pollForTestCompletion();
