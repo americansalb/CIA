@@ -361,52 +361,71 @@ async function checkVideoQuality() {
           // Check if face is fully visible (not cut off at edges)
           const face = faces[0];
 
-          // Debug: log the ENTIRE face object to see all available properties
-          console.log('FULL face object:', face);
-          console.log('Face object keys:', Object.keys(face));
+          // Debug: Check keypoints since box is all zeros
+          console.log('Keypoints:', face.keypoints);
 
-          const box = face.box;
           const videoWidth = previewVideo.videoWidth;
           const videoHeight = previewVideo.videoHeight;
 
-          // Debug: log the raw box object to see what properties it actually has
-          console.log('Raw box object:', box);
-          console.log('Box properties - xMin:', box.xMin, 'yMin:', box.yMin, 'width:', box.width, 'height:', box.height);
+          // The box property is broken (all zeros), so calculate from keypoints
+          // Keypoints array contains facial landmarks with x, y coordinates
+          if (face.keypoints && face.keypoints.length > 0) {
+            // Find min/max x and y from all keypoints to create bounding box
+            let minX = Infinity, minY = Infinity;
+            let maxX = -Infinity, maxY = -Infinity;
 
-          // MediaPipe Face Detector provides: xMin, yMin, width, height
-          // Calculate xMax and yMax from these values
-          const xMax = box.xMin + box.width;
-          const yMax = box.yMin + box.height;
+            for (const kp of face.keypoints) {
+              if (kp.x < minX) minX = kp.x;
+              if (kp.x > maxX) maxX = kp.x;
+              if (kp.y < minY) minY = kp.y;
+              if (kp.y > maxY) maxY = kp.y;
+            }
 
-          // Debug: log face position
-          const margins = {
-            left: box.xMin,
-            right: videoWidth - xMax,
-            top: box.yMin,
-            bottom: videoHeight - yMax
-          };
-          console.log('Face margins from edges (px):', margins);
+            // Add some padding around the keypoints (20%) to approximate full face
+            const width = maxX - minX;
+            const height = maxY - minY;
+            const paddingX = width * 0.2;
+            const paddingY = height * 0.2;
 
-          // Very minimal margin (2%) - only catches actual cutoffs at frame edges
-          const marginX = videoWidth * 0.02;
-          const marginY = videoHeight * 0.02;
+            const xMin = Math.max(0, minX - paddingX);
+            const yMin = Math.max(0, minY - paddingY);
+            const xMax = Math.min(videoWidth, maxX + paddingX);
+            const yMax = Math.min(videoHeight, maxY + paddingY);
 
-          const isFaceFullyVisible =
-            box.xMin > marginX &&
-            xMax < (videoWidth - marginX) &&
-            box.yMin > marginY &&
-            yMax < (videoHeight - marginY);
+            console.log('Calculated bounding box from keypoints:', {xMin, yMin, xMax, yMax});
 
-          if (isFaceFullyVisible) {
-            faceDetected.innerHTML = '<span style="color: #4caf50;">✓ Face Fully Visible</span>';
+            // Debug: log face position
+            const margins = {
+              left: xMin,
+              right: videoWidth - xMax,
+              top: yMin,
+              bottom: videoHeight - yMax
+            };
+            console.log('Face margins from edges (px):', margins);
+
+            // Very minimal margin (2%) - only catches actual cutoffs at frame edges
+            const marginX = videoWidth * 0.02;
+            const marginY = videoHeight * 0.02;
+
+            const isFaceFullyVisible =
+              xMin > marginX &&
+              xMax < (videoWidth - marginX) &&
+              yMin > marginY &&
+              yMax < (videoHeight - marginY);
+
+            if (isFaceFullyVisible) {
+              faceDetected.innerHTML = '<span style="color: #4caf50;">✓ Face Fully Visible</span>';
+            } else {
+              // Show which edge is the problem
+              const issues = [];
+              if (xMin <= marginX) issues.push('left');
+              if (xMax >= (videoWidth - marginX)) issues.push('right');
+              if (yMin <= marginY) issues.push('top');
+              if (yMax >= (videoHeight - marginY)) issues.push('bottom');
+              faceDetected.innerHTML = `<span style="color: #ff9800;">⚠ Too close to ${issues.join(', ')} edge</span>`;
+            }
           } else {
-            // Show which edge is the problem
-            const issues = [];
-            if (box.xMin <= marginX) issues.push('left');
-            if (xMax >= (videoWidth - marginX)) issues.push('right');
-            if (box.yMin <= marginY) issues.push('top');
-            if (yMax >= (videoHeight - marginY)) issues.push('bottom');
-            faceDetected.innerHTML = `<span style="color: #ff9800;">⚠ Too close to ${issues.join(', ')} edge</span>`;
+            faceDetected.innerHTML = '<span style="color: #ff9800;">⚠ No Keypoints Detected</span>';
           }
         } else {
           faceDetected.innerHTML = '<span style="color: #ff9800;">⚠ No Face Detected</span>';
