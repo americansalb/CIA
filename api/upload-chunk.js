@@ -54,16 +54,41 @@ module.exports = async (req, res) => {
       // Read file into buffer
       const fileBuffer = fs.readFileSync(videoFile[0].filepath);
 
+      // CRITICAL: Validate Google Drive config before attempting upload
+      if (!process.env.GOOGLE_DRIVE_FOLDER_ID) {
+        console.error('CRITICAL: GOOGLE_DRIVE_FOLDER_ID not configured');
+        // Save locally but don't crash
+        fs.unlinkSync(videoFile[0].filepath);
+        return res.status(500).json({
+          success: false,
+          message: 'Server configuration error - uploads disabled',
+        });
+      }
+
       // Create folder structure: CIA_Recordings/Email_StudentID/SessionID/Chunks
       const mainFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
       const studentFolderName = `${session.email}_${session.studentId}`;
-      const studentFolderId = await findOrCreateFolder(mainFolderId, studentFolderName);
-      const sessionFolderId = await findOrCreateFolder(studentFolderId, sessionId[0]);
-      const chunksFolderId = await findOrCreateFolder(sessionFolderId, 'chunks');
 
-      // Upload chunk
-      const fileName = `${deviceType[0]}_chunk_${chunkNumber[0]}.webm`;
-      const uploadResult = await uploadBuffer(fileBuffer, fileName, chunksFolderId, 'video/webm');
+      let studentFolderId, sessionFolderId, chunksFolderId, uploadResult;
+
+      try {
+        studentFolderId = await findOrCreateFolder(mainFolderId, studentFolderName);
+        sessionFolderId = await findOrCreateFolder(studentFolderId, sessionId[0]);
+        chunksFolderId = await findOrCreateFolder(sessionFolderId, 'chunks');
+
+        // Upload chunk
+        const fileName = `${deviceType[0]}_chunk_${chunkNumber[0]}.webm`;
+        uploadResult = await uploadBuffer(fileBuffer, fileName, chunksFolderId, 'video/webm');
+      } catch (driveError) {
+        console.error('Google Drive upload error:', driveError);
+        // Clean up temp file
+        fs.unlinkSync(videoFile[0].filepath);
+        return res.status(500).json({
+          success: false,
+          message: 'Upload to Google Drive failed',
+          error: driveError.message,
+        });
+      }
 
       // Track chunk in session
       if (!session.chunks[deviceType[0]]) {
@@ -85,9 +110,20 @@ module.exports = async (req, res) => {
       });
     } catch (error) {
       console.error('Chunk upload error:', error);
+
+      // Ensure temp file is cleaned up even on error
+      try {
+        if (files && files.video && files.video[0] && files.video[0].filepath) {
+          fs.unlinkSync(files.video[0].filepath);
+        }
+      } catch (cleanupError) {
+        console.error('Cleanup error:', cleanupError);
+      }
+
       res.status(500).json({
         success: false,
         message: 'Failed to upload chunk',
+        error: error.message,
       });
     }
   });

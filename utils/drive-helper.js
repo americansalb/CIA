@@ -3,34 +3,39 @@ const fs = require('fs');
 const path = require('path');
 
 async function findOrCreateFolder(parentFolderId, folderName) {
-  const drive = await getDrive();
+  try {
+    const drive = await getDrive();
 
-  // Search for existing folder
-  const query = `name='${folderName}' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+    // Search for existing folder
+    const query = `name='${folderName}' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
 
-  const searchResponse = await drive.files.list({
-    q: query,
-    fields: 'files(id, name)',
-    spaces: 'drive',
-  });
+    const searchResponse = await drive.files.list({
+      q: query,
+      fields: 'files(id, name)',
+      spaces: 'drive',
+    });
 
-  if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-    return searchResponse.data.files[0].id;
+    if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+      return searchResponse.data.files[0].id;
+    }
+
+    // Create new folder
+    const fileMetadata = {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentFolderId],
+    };
+
+    const folder = await drive.files.create({
+      resource: fileMetadata,
+      fields: 'id',
+    });
+
+    return folder.data.id;
+  } catch (error) {
+    console.error(`Drive API error in findOrCreateFolder(${parentFolderId}, ${folderName}):`, error.message);
+    throw new Error(`Failed to create/find folder "${folderName}": ${error.message}`);
   }
-
-  // Create new folder
-  const fileMetadata = {
-    name: folderName,
-    mimeType: 'application/vnd.google-apps.folder',
-    parents: [parentFolderId],
-  };
-
-  const folder = await drive.files.create({
-    resource: fileMetadata,
-    fields: 'id',
-  });
-
-  return folder.data.id;
 }
 
 async function uploadFile(filePath, fileName, folderId, mimeType = 'video/webm') {
@@ -60,34 +65,39 @@ async function uploadFile(filePath, fileName, folderId, mimeType = 'video/webm')
 }
 
 async function uploadBuffer(buffer, fileName, folderId, mimeType = 'video/webm') {
-  const drive = await getDrive();
-  const { Readable } = require('stream');
+  try {
+    const drive = await getDrive();
+    const { Readable } = require('stream');
 
-  const fileMetadata = {
-    name: fileName,
-    parents: [folderId],
-  };
+    const fileMetadata = {
+      name: fileName,
+      parents: [folderId],
+    };
 
-  const bufferStream = new Readable();
-  bufferStream.push(buffer);
-  bufferStream.push(null);
+    const bufferStream = new Readable();
+    bufferStream.push(buffer);
+    bufferStream.push(null);
 
-  const media = {
-    mimeType: mimeType,
-    body: bufferStream,
-  };
+    const media = {
+      mimeType: mimeType,
+      body: bufferStream,
+    };
 
-  const file = await drive.files.create({
-    resource: fileMetadata,
-    media: media,
-    fields: 'id, name, webViewLink',
-  });
+    const file = await drive.files.create({
+      resource: fileMetadata,
+      media: media,
+      fields: 'id, name, webViewLink',
+    });
 
-  return {
-    fileId: file.data.id,
-    fileName: file.data.name,
-    webViewLink: file.data.webViewLink,
-  };
+    return {
+      fileId: file.data.id,
+      fileName: file.data.name,
+      webViewLink: file.data.webViewLink,
+    };
+  } catch (error) {
+    console.error(`Drive API error in uploadBuffer(${fileName}, ${folderId}):`, error.message);
+    throw new Error(`Failed to upload file "${fileName}": ${error.message}`);
+  }
 }
 
 async function listRecordings(folderId) {
