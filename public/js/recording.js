@@ -336,8 +336,10 @@ class RecordingManager {
   }
 
   async uploadChunkWithRetry(chunkId, blob, chunkNumber, attempt = 1) {
-    const maxAttempts = 5;
+    // CRITICAL: NO MAX ATTEMPTS - NEVER GIVE UP!
+    // Keep retrying indefinitely until upload succeeds
     const baseDelay = 2000; // 2 seconds
+    const maxDelay = 60000; // Cap at 60 seconds between retries
 
     const formData = new FormData();
     formData.append('video', blob, `${this.deviceType}_chunk_${chunkNumber}.webm`);
@@ -369,18 +371,18 @@ class RecordingManager {
     } catch (error) {
       console.error(`[${this.deviceType}] Chunk ${chunkNumber} upload error (attempt ${attempt}):`, error);
 
-      if (attempt < maxAttempts) {
-        // Exponential backoff
-        const delay = baseDelay * Math.pow(2, attempt - 1);
-        console.log(`[${this.deviceType}] Retrying chunk ${chunkNumber} in ${delay}ms...`);
+      // INFINITE RETRY - exponential backoff capped at maxDelay
+      const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
+      console.log(`[${this.deviceType}] CRITICAL: Chunk ${chunkNumber} upload failed. Retrying in ${delay}ms... (attempt ${attempt})`);
 
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return this.uploadChunkWithRetry(chunkId, blob, chunkNumber, attempt + 1);
-      } else {
-        console.error(`[${this.deviceType}] Chunk ${chunkNumber} failed after ${maxAttempts} attempts`);
-        this.showNotification(`Chunk ${chunkNumber} saved locally (connection issue)`, 'warning');
-        return false;
+      if (attempt === 1) {
+        this.showNotification(`Upload failed - retrying chunk ${chunkNumber}...`, 'warning', 5000);
+      } else if (attempt >= 5) {
+        this.showNotification(`CRITICAL: Still retrying chunk ${chunkNumber} (attempt ${attempt})`, 'error', 0);
       }
+
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return this.uploadChunkWithRetry(chunkId, blob, chunkNumber, attempt + 1);
     }
   }
 
@@ -402,6 +404,23 @@ class RecordingManager {
 
       this.processUploadQueue();
     }
+  }
+
+  // Get current upload status
+  getUploadStatus() {
+    return {
+      pendingUploads: this.uploadQueue.length,
+      uploadedChunks: this.uploadedChunkIds.size,
+      totalChunks: this.chunkNumber,
+      isUploading: this.isUploading,
+      connectionHealthy: this.connectionHealthy,
+    };
+  }
+
+  // Check if all uploads are complete
+  async areAllUploadsComplete() {
+    const unuploaded = await recordingBackup.getUnuploadedChunks(this.sessionId);
+    return this.uploadQueue.length === 0 && unuploaded.length === 0;
   }
 
   async stopRecording() {
@@ -426,13 +445,46 @@ class RecordingManager {
     // Wait a bit for final ondataavailable event
     await new Promise(resolve => setTimeout(resolve, 500));
 
-    // Wait for all chunks to upload
+    // CRITICAL: Wait for ALL chunks to upload - NEVER proceed with pending uploads
+    console.log(`[${this.deviceType}] Waiting for all chunks to upload...`);
+    this.showNotification('Waiting for all data to upload - DO NOT CLOSE BROWSER', 'warning', 0);
+
+    let waitCount = 0;
     while (this.uploadQueue.length > 0) {
+      waitCount++;
+      if (waitCount % 10 === 0) {
+        const status = this.getUploadStatus();
+        console.log(`[${this.deviceType}] Still waiting... Pending: ${status.pendingUploads}, Uploaded: ${status.uploadedChunks}/${status.totalChunks}`);
+        this.showNotification(`Uploading... ${status.uploadedChunks}/${status.totalChunks} chunks complete`, 'warning', 0);
+      }
       await new Promise(resolve => setTimeout(resolve, 1000));
       await this.processUploadQueue();
     }
 
-    console.log(`[${this.deviceType}] Recording stopped`);
+    // Verify all chunks uploaded from IndexedDB
+    const unuploaded = await recordingBackup.getUnuploadedChunks(this.sessionId);
+    if (unuploaded.length > 0) {
+      console.error(`[${this.deviceType}] CRITICAL: ${unuploaded.length} chunks still not uploaded!`);
+      this.showNotification(`CRITICAL: ${unuploaded.length} chunks not uploaded - retrying...`, 'error', 0);
+
+      // Add them back to queue
+      for (const chunk of unuploaded) {
+        if (!this.uploadedChunkIds.has(chunk.id)) {
+          this.uploadQueue.push({
+            chunkId: chunk.id,
+            blob: chunk.blob,
+            chunkNumber: chunk.chunkNumber,
+          });
+        }
+      }
+
+      // Retry until ALL are uploaded
+      await this.stopRecording();
+      return;
+    }
+
+    console.log(`[${this.deviceType}] All chunks uploaded successfully`);
+    this.showNotification('All data uploaded successfully!', 'success', 3000);
   }
 
   async uploadFinalVideo(interventionCount = 0) {
