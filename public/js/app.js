@@ -577,6 +577,9 @@ showPage = async function(pageId) {
       // Start continuous quality monitoring during test
       startTestQualityMonitoring();
 
+      // Start proctor status monitoring
+      startProctorStatusMonitoring();
+
       // Start audio visualization
       startAudioVisualization();
 
@@ -710,6 +713,50 @@ async function startTestQualityMonitoring() {
       }
     }
   }, 2500); // Check every 2.5 seconds during test
+}
+
+// Monitor proctor connection status and update UI
+let proctorStatusInterval;
+function startProctorStatusMonitoring() {
+  const statusBox = document.getElementById('proctorStatusBox');
+  const proctorRecIndicator = document.getElementById('proctorRecording');
+
+  if (!statusBox) return;
+
+  // Initial check
+  checkProctorStatus();
+
+  // Check every 5 seconds
+  proctorStatusInterval = setInterval(checkProctorStatus, 5000);
+
+  async function checkProctorStatus() {
+    if (!sessionData || !sessionData.sessionId) return;
+
+    try {
+      const response = await fetch(`/api/session-status/${sessionData.sessionId}`);
+      const result = await response.json();
+
+      if (result.success && result.proctorDeviceConnected) {
+        // Proctor is connected
+        statusBox.style.background = '#e8f5e9';
+        statusBox.innerHTML = `
+          <div style="font-size: 14px; color: #2e7d32; font-weight: 600; margin-bottom: 5px;">✓ Second Device Active</div>
+          <div style="font-size: 12px; color: #666;">Recording from both cameras</div>
+        `;
+        proctorRecIndicator.style.display = 'block';
+      } else {
+        // Proctor disconnected or not connected yet
+        statusBox.style.background = '#fff3cd';
+        statusBox.innerHTML = `
+          <div style="font-size: 14px; color: #856404; font-weight: 600; margin-bottom: 5px;">⚠️ Second Device Disconnected</div>
+          <div style="font-size: 12px; color: #666;">Reconnect if possible</div>
+        `;
+        proctorRecIndicator.style.display = 'none';
+      }
+    } catch (error) {
+      console.error('Error checking proctor status:', error);
+    }
+  }
 }
 
 // Audio input visualization

@@ -237,7 +237,10 @@ class RecordingManager {
       });
 
       console.log(`[${this.deviceType}] Recording started with enhanced reliability`);
-      this.showNotification('Recording started', 'success');
+      // Silent for users - they just need to know recording is active
+      if (this.deviceType !== 'screen') {
+        this.showNotification('Recording started', 'success', 2000);
+      }
     } catch (error) {
       console.error(`[${this.deviceType}] Failed to start recording:`, error);
       this.showNotification('Failed to start recording', 'error');
@@ -461,7 +464,8 @@ class RecordingManager {
 
     // CRITICAL: Wait for ALL chunks to upload - NEVER proceed with pending uploads
     console.log(`[${this.deviceType}] Waiting for all chunks to upload...`);
-    this.showNotification('Finalizing upload - please wait...', 'info', 0);
+    // User-friendly message without technical details
+    this.showNotification('Saving recording...', 'info', 0);
 
     let waitCount = 0;
     while (this.uploadQueue.length > 0) {
@@ -469,9 +473,9 @@ class RecordingManager {
       if (waitCount % 10 === 0) {
         const status = this.getUploadStatus();
         console.log(`[${this.deviceType}] Still waiting... Pending: ${status.pendingUploads}, Uploaded: ${status.uploadedChunks}/${status.totalChunks}`);
-        // Show simple progress to user
+        // Show simple percentage progress without technical details
         const percentComplete = Math.floor((status.uploadedChunks / status.totalChunks) * 100);
-        this.showNotification(`Uploading... ${percentComplete}% complete`, 'info', 0);
+        this.showNotification(`Saving... ${percentComplete}%`, 'info', 0);
       }
       await new Promise(resolve => setTimeout(resolve, 1000));
       await this.processUploadQueue();
@@ -481,7 +485,8 @@ class RecordingManager {
     const unuploaded = await recordingBackup.getUnuploadedChunks(this.sessionId);
     if (unuploaded.length > 0) {
       console.error(`[${this.deviceType}] CRITICAL: ${unuploaded.length} chunks still not uploaded!`);
-      this.showNotification(`Completing upload - please wait...`, 'info', 0);
+      // User-friendly message - hide technical "chunks" terminology
+      this.showNotification(`Finalizing upload...`, 'info', 0);
 
       // Add them back to queue
       for (const chunk of unuploaded) {
@@ -500,7 +505,8 @@ class RecordingManager {
     }
 
     console.log(`[${this.deviceType}] All chunks uploaded successfully`);
-    this.showNotification('Upload complete!', 'success', 2000);
+    // Simple user-friendly message
+    this.showNotification('Recording saved successfully', 'success', 2000);
   }
 
   async uploadFinalVideo(interventionCount = 0) {
@@ -577,7 +583,14 @@ class RecordingManager {
   }
 
   showNotification(message, type = 'info', duration = 3000) {
-    // Check if we should show notifications for this device type
+    // Only show notifications for non-screen recordings and only important messages
+    // Hide all technical "chunk" details from users
+    if (message.toLowerCase().includes('chunk')) {
+      // Never show chunk-related messages to users
+      console.log(`[${this.deviceType}] ${message}`);
+      return;
+    }
+
     const notificationEl = document.getElementById(`${this.deviceType}Notification`);
     if (!notificationEl) return;
 
