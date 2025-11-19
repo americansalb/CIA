@@ -76,8 +76,11 @@ module.exports = async (req, res) => {
         sessionFolderId = await findOrCreateFolder(studentFolderId, sessionId[0]);
 
         // Upload chunk directly to session folder (no "chunks" subfolder)
-        const fileName = `${deviceType[0]}_chunk_${chunkNumber[0]}.webm`;
-        uploadResult = await uploadBuffer(fileBuffer, fileName, sessionFolderId, 'video/webm');
+        // Detect format from uploaded file mime type (iOS uses MP4, desktop uses WebM)
+        const fileMimeType = videoFile[0].mimetype || 'video/webm';
+        const fileExtension = fileMimeType.includes('mp4') ? 'mp4' : 'webm';
+        const fileName = `${deviceType[0]}_chunk_${chunkNumber[0]}.${fileExtension}`;
+        uploadResult = await uploadBuffer(fileBuffer, fileName, sessionFolderId, fileMimeType);
       } catch (driveError) {
         console.error('Google Drive upload error:', driveError);
         // Clean up temp file

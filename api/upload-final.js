@@ -48,9 +48,12 @@ module.exports = async (req, res) => {
       const sessionFolderId = await findOrCreateFolder(studentFolderId, sessionId[0]);
 
       // Upload final video
+      // Detect format from uploaded file mime type (iOS uses MP4, desktop uses WebM)
+      const fileMimeType = videoFile[0].mimetype || 'video/webm';
+      const fileExtension = fileMimeType.includes('mp4') ? 'mp4' : 'webm';
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const fileName = `${session.email}_${session.studentId}_${session.permittedTest}_${deviceType[0]}_FINAL_${timestamp}.webm`;
-      const uploadResult = await uploadBuffer(fileBuffer, fileName, sessionFolderId, 'video/webm');
+      const fileName = `${session.email}_${session.studentId}_${session.permittedTest}_${deviceType[0]}_FINAL_${timestamp}.${fileExtension}`;
+      const uploadResult = await uploadBuffer(fileBuffer, fileName, sessionFolderId, fileMimeType);
 
       // Create metadata file
       const metadata = {

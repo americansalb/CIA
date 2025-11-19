@@ -175,18 +175,30 @@ class RecordingManager {
 
     try {
       // Use good video quality for smooth playback, excellent audio for transcription
-      const options = {
-        mimeType: 'video/webm;codecs=vp8,opus',
+      // CRITICAL: iOS Safari only supports MP4, not WebM!
+      let options = {
         videoBitsPerSecond: 2000000, // 2 Mbps - smooth HD video
         audioBitsPerSecond: 192000, // 192 kbps - excellent audio for transcription
       };
 
-      // Fallback for browsers that don't support vp8
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+      // Try formats in order of preference
+      if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
+        options.mimeType = 'video/webm;codecs=vp8,opus';
+      } else if (MediaRecorder.isTypeSupported('video/webm')) {
         options.mimeType = 'video/webm';
+      } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+        // iOS Safari uses MP4
+        options.mimeType = 'video/mp4';
+      } else {
+        // Let browser choose
+        console.warn('No preferred format supported, using browser default');
       }
 
       this.mediaRecorder = new MediaRecorder(stream, options);
+
+      // Store the actual mime type being used (critical for iOS MP4 support)
+      this.recordingMimeType = options.mimeType || this.mediaRecorder.mimeType || 'video/webm';
+      console.log(`[${this.deviceType}] Recording with format: ${this.recordingMimeType}`);
 
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
@@ -279,7 +291,8 @@ class RecordingManager {
   async uploadChunk() {
     if (this.chunks.length === 0) return;
 
-    const blob = new Blob(this.chunks, { type: 'video/webm' });
+    // Use the actual recording mime type (webm for desktop, mp4 for iOS)
+    const blob = new Blob(this.chunks, { type: this.recordingMimeType });
     this.chunks = []; // Clear chunks after creating blob
     this.chunkNumber++;
 
@@ -600,17 +613,27 @@ class InterventionRecorder {
       action: null,
     };
 
-    const options = {
-      mimeType: 'video/webm;codecs=vp8,opus',
+    // CRITICAL: iOS Safari only supports MP4, not WebM!
+    let options = {
       videoBitsPerSecond: 2000000, // 2 Mbps - smooth HD video
       audioBitsPerSecond: 192000,
     };
 
-    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+    // Try formats in order of preference
+    if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
+      options.mimeType = 'video/webm;codecs=vp8,opus';
+    } else if (MediaRecorder.isTypeSupported('video/webm')) {
       options.mimeType = 'video/webm';
+    } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+      // iOS Safari uses MP4
+      options.mimeType = 'video/mp4';
+    } else {
+      // Let browser choose
+      console.warn('No preferred format supported for intervention, using browser default');
     }
 
     this.mediaRecorder = new MediaRecorder(stream, options);
+    console.log(`Intervention recording with format: ${options.mimeType || 'default'}`);
 
     this.mediaRecorder.ondataavailable = (event) => {
       if (event.data && event.data.size > 0) {
