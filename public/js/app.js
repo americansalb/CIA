@@ -1147,22 +1147,23 @@ async function checkForRecovery(userEmail) {
       if (unfinishedSessions.length > 0) {
         console.log(`Found ${unfinishedSessions.length} unfinished session(s) for ${userEmail}`);
 
-        // Show recovery notification
+        // Store recovery data globally
+        window.unfinishedSessions = unfinishedSessions;
+
+        // Show uploading notification immediately
         const recoveryDiv = document.createElement('div');
         recoveryDiv.className = 'recovery-notification';
         recoveryDiv.innerHTML = `
           <div class="recovery-content">
-            <h3>⚠️ Unfinished Test Detected</h3>
-            <p>We found ${unfinishedSessions.length} incomplete test session(s) with unsaved recordings from a previous session.</p>
-            <p style="font-size: 13px; color: #666;">Note: If the server was restarted, the upload may fail. In that case, please contact your administrator.</p>
-            <button onclick="attemptRecovery()">Try Upload</button>
-            <button onclick="dismissRecovery(true)">Delete Old Data</button>
+            <h3>⚠️ Uploading Previous Test Data</h3>
+            <p>Found ${unfinishedSessions.length} incomplete test session(s). Uploading now...</p>
+            <p style="font-size: 13px; color: #666;">Please wait, this is required for test integrity.</p>
           </div>
         `;
         document.body.appendChild(recoveryDiv);
 
-        // Store recovery data globally
-        window.unfinishedSessions = unfinishedSessions;
+        // AUTOMATICALLY start recovery upload (no user choice)
+        setTimeout(() => attemptRecovery(), 1000);
       }
     };
   } catch (error) {
@@ -1244,52 +1245,25 @@ window.attemptRecovery = async function() {
   if (recoveryDiv) {
     if (sessionNotFound) {
       recoveryDiv.innerHTML = `
-        <div class="recovery-content">
-          <p>⚠️ Recovery failed: Server was restarted and session data was lost.</p>
-          <p style="font-size: 13px;">Uploaded: ${totalUploaded} | Failed: ${totalFailed}</p>
-          <p style="font-size: 13px;">The local recovery data has been cleared. Please contact your administrator if you need assistance.</p>
-          <button onclick="this.parentElement.parentElement.remove()">OK</button>
+        <div class="recovery-content" style="background: #fff3cd; border-left: 4px solid #ff9800;">
+          <h3>⚠️ Upload Failed - Server Restart Detected</h3>
+          <p>Attempted: ${totalUploaded + totalFailed} chunks | Uploaded: ${totalUploaded} | Failed: ${totalFailed}</p>
+          <p style="font-size: 13px; margin-top: 10px;">The server was restarted and cannot process this recovery. The local data has been cleared.</p>
+          <p style="font-size: 13px; font-weight: bold; color: #d32f2f;">You must contact your administrator immediately and report this session was not uploaded.</p>
+          <button onclick="this.parentElement.parentElement.remove()" style="margin-top: 10px; background: #ff9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">I Understand - I Will Contact Administrator</button>
         </div>`;
     } else if (totalFailed > 0) {
       recoveryDiv.innerHTML = `
-        <div class="recovery-content">
-          <p>⚠️ Partial recovery: ${totalUploaded} uploaded, ${totalFailed} failed</p>
-          <button onclick="this.parentElement.parentElement.remove()">OK</button>
+        <div class="recovery-content" style="background: #fff3cd; border-left: 4px solid #ff9800;">
+          <h3>⚠️ Partial Upload</h3>
+          <p>Uploaded: ${totalUploaded} chunks | Failed: ${totalFailed} chunks</p>
+          <p style="font-size: 13px; margin-top: 10px; font-weight: bold; color: #d32f2f;">Some data could not be uploaded. Contact your administrator.</p>
+          <button onclick="this.parentElement.parentElement.remove()" style="margin-top: 10px; background: #ff9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">I Understand</button>
         </div>`;
     } else {
-      recoveryDiv.innerHTML = '<div class="recovery-content"><p>✓ Recovery complete! All chunks uploaded successfully.</p></div>';
+      recoveryDiv.innerHTML = '<div class="recovery-content" style="background: #d4edda; border-left: 4px solid #4caf50;"><h3>✓ Upload Complete</h3><p>All previous test data has been successfully uploaded.</p></div>';
       setTimeout(() => recoveryDiv.remove(), 3000);
     }
-  }
-
-  window.unfinishedSessions = [];
-};
-
-window.dismissRecovery = async function(deleteData = false) {
-  const recoveryDiv = document.querySelector('.recovery-notification');
-
-  if (deleteData && window.unfinishedSessions && window.unfinishedSessions.length > 0) {
-    // Actually delete the data from IndexedDB
-    if (recoveryDiv) {
-      recoveryDiv.innerHTML = '<div class="recovery-content"><p>Deleting old recovery data...</p></div>';
-    }
-
-    for (const session of window.unfinishedSessions) {
-      try {
-        await recordingBackup.clearSession(session.sessionId);
-        console.log(`Cleared recovery data for session ${session.sessionId}`);
-      } catch (error) {
-        console.error(`Failed to clear session ${session.sessionId}:`, error);
-      }
-    }
-
-    if (recoveryDiv) {
-      recoveryDiv.innerHTML = '<div class="recovery-content"><p>✓ Old data deleted</p></div>';
-      setTimeout(() => recoveryDiv.remove(), 2000);
-    }
-  } else {
-    // Just dismiss the notification
-    if (recoveryDiv) recoveryDiv.remove();
   }
 
   window.unfinishedSessions = [];
