@@ -65,20 +65,19 @@ module.exports = async (req, res) => {
         });
       }
 
-      // Create folder structure: CIA_Recordings/Email_StudentID/SessionID/Chunks
+      // Create folder structure: Email_StudentID/SessionID/
       const mainFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
       const studentFolderName = `${session.email}_${session.studentId}`;
 
-      let studentFolderId, sessionFolderId, chunksFolderId, uploadResult;
+      let studentFolderId, sessionFolderId, uploadResult;
 
       try {
         studentFolderId = await findOrCreateFolder(mainFolderId, studentFolderName);
         sessionFolderId = await findOrCreateFolder(studentFolderId, sessionId[0]);
-        chunksFolderId = await findOrCreateFolder(sessionFolderId, 'chunks');
 
-        // Upload chunk
+        // Upload chunk directly to session folder (no "chunks" subfolder)
         const fileName = `${deviceType[0]}_chunk_${chunkNumber[0]}.webm`;
-        uploadResult = await uploadBuffer(fileBuffer, fileName, chunksFolderId, 'video/webm');
+        uploadResult = await uploadBuffer(fileBuffer, fileName, sessionFolderId, 'video/webm');
       } catch (driveError) {
         console.error('Google Drive upload error:', driveError);
         // Clean up temp file

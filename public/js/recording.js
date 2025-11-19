@@ -174,11 +174,11 @@ class RecordingManager {
     await recordingBackup.init();
 
     try {
-      // Use low video quality, good audio quality
+      // Use good video quality for smooth playback, excellent audio for transcription
       const options = {
         mimeType: 'video/webm;codecs=vp8,opus',
-        videoBitsPerSecond: 100000, // 100 kbps - low quality video
-        audioBitsPerSecond: 192000, // 192 kbps - good audio for transcription
+        videoBitsPerSecond: 2000000, // 2 Mbps - smooth HD video
+        audioBitsPerSecond: 192000, // 192 kbps - excellent audio for transcription
       };
 
       // Fallback for browsers that don't support vp8
@@ -602,7 +602,7 @@ class InterventionRecorder {
 
     const options = {
       mimeType: 'video/webm;codecs=vp8,opus',
-      videoBitsPerSecond: 100000,
+      videoBitsPerSecond: 2000000, // 2 Mbps - smooth HD video
       audioBitsPerSecond: 192000,
     };
 

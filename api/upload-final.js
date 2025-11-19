@@ -40,9 +40,10 @@ module.exports = async (req, res) => {
       // Read file into buffer
       const fileBuffer = fs.readFileSync(videoFile[0].filepath);
 
-      // Create folder structure
+      // Create folder structure matching chunk uploads
       const mainFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
       const studentFolderName = `${session.email}_${session.studentId}`;
+
       const studentFolderId = await findOrCreateFolder(mainFolderId, studentFolderName);
       const sessionFolderId = await findOrCreateFolder(studentFolderId, sessionId[0]);
 
