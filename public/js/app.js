@@ -353,14 +353,15 @@ async function checkVideoQuality() {
 
     if (faceDetector) {
       try {
-        // Debug: check video state
-        console.log('Video dimensions:', previewVideo.videoWidth, 'x', previewVideo.videoHeight);
-        console.log('Video readyState:', previewVideo.readyState);
-        console.log('Video paused:', previewVideo.paused);
+        // Use the canvas instead of video element for face detection
+        // The canvas has the current frame already drawn
+        console.log('Detecting faces from canvas:', canvas.width, 'x', canvas.height);
 
-        const faces = await faceDetector.estimateFaces(previewVideo, {
+        const faces = await faceDetector.estimateFaces(canvas, {
           flipHorizontal: false,
         });
+
+        console.log('Number of faces detected:', faces ? faces.length : 0);
 
         if (faces && faces.length > 0) {
           // Check if face is fully visible (not cut off at edges)
