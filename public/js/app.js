@@ -108,6 +108,9 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
       if (sessionResult.success) {
         sessionData = sessionResult;
 
+        // Check for unfinished sessions for this user
+        checkForRecovery(studentData.email);
+
         // Load test configuration from Google Sheets
         const testConfigResponse = await fetch(`/api/test-config?testName=${encodeURIComponent(studentData.permittedTest)}`);
         const testConfigResult = await testConfigResponse.json();
@@ -1047,6 +1050,8 @@ document.addEventListener('visibilitychange', async () => {
       // Save current state to IndexedDB when tab is hidden
       await recordingBackup.saveMetadata(sessionData.sessionId, {
         deviceType: 'main',
+        email: sessionData.email, // Add email for user-specific recovery
+        studentId: sessionData.studentId,
         startTime: testStartTime,
         lastChunkNumber: mainRecorder.chunkNumber || 0,
         currentSegment: currentSegment,
@@ -1072,6 +1077,8 @@ function startAutoSave() {
       try {
         await recordingBackup.saveMetadata(sessionData.sessionId, {
           deviceType: 'main',
+          email: sessionData.email, // Add email for user-specific recovery
+          studentId: sessionData.studentId,
           startTime: testStartTime,
           lastChunkNumber: mainRecorder.chunkNumber || 0,
           currentSegment: currentSegment,
@@ -1114,8 +1121,8 @@ function updateUploadStatus() {
   }
 }
 
-// Check for unfinished sessions on login
-async function checkForRecovery() {
+// Check for unfinished sessions on login (only for current user)
+async function checkForRecovery(userEmail) {
   try {
     await recordingBackup.init();
 
@@ -1129,15 +1136,16 @@ async function checkForRecovery() {
     getAllRequest.onsuccess = async () => {
       const sessions = getAllRequest.result;
 
-      // Find sessions that are marked as in progress
+      // Find sessions that are marked as in progress AND belong to current user
       const unfinishedSessions = sessions.filter(s =>
         s.testInProgress &&
+        s.email === userEmail && // Only show recovery for current user
         s.lastSeen &&
         (Date.now() - s.lastSeen) < 24 * 60 * 60 * 1000 // Within last 24 hours
       );
 
       if (unfinishedSessions.length > 0) {
-        console.log(`Found ${unfinishedSessions.length} unfinished session(s)`);
+        console.log(`Found ${unfinishedSessions.length} unfinished session(s) for ${userEmail}`);
 
         // Show recovery notification
         const recoveryDiv = document.createElement('div');
@@ -1145,9 +1153,10 @@ async function checkForRecovery() {
         recoveryDiv.innerHTML = `
           <div class="recovery-content">
             <h3>⚠️ Unfinished Test Detected</h3>
-            <p>We found ${unfinishedSessions.length} incomplete test session(s) with unsaved recordings.</p>
-            <button onclick="attemptRecovery()">Upload Now</button>
-            <button onclick="dismissRecovery()">Dismiss</button>
+            <p>We found ${unfinishedSessions.length} incomplete test session(s) with unsaved recordings from a previous session.</p>
+            <p style="font-size: 13px; color: #666;">Note: If the server was restarted, the upload may fail. In that case, please contact your administrator.</p>
+            <button onclick="attemptRecovery()">Try Upload</button>
+            <button onclick="dismissRecovery(true)">Delete Old Data</button>
           </div>
         `;
         document.body.appendChild(recoveryDiv);
@@ -1170,6 +1179,10 @@ window.attemptRecovery = async function() {
     recoveryDiv.innerHTML = '<div class="recovery-content"><p>Uploading saved recordings...</p></div>';
   }
 
+  let totalUploaded = 0;
+  let totalFailed = 0;
+  let sessionNotFound = false;
+
   for (const session of window.unfinishedSessions) {
     try {
       // Get all unuploaded chunks for this session
@@ -1187,6 +1200,8 @@ window.attemptRecovery = async function() {
           formData.append('chunkNumber', chunk.chunkNumber.toString());
           formData.append('timestamp', chunk.timestamp.toString());
           formData.append('recovery', 'true');
+          formData.append('email', session.email); // Include email for recovery
+          formData.append('studentId', session.studentId);
 
           try {
             const response = await fetch('/api/upload-chunk', {
@@ -1194,27 +1209,32 @@ window.attemptRecovery = async function() {
               body: formData,
             });
 
+            if (response.status === 404) {
+              sessionNotFound = true;
+              console.error(`Recovery: Session ${session.sessionId} not found on server`);
+              totalFailed++;
+              break; // Stop trying to upload chunks for this session
+            }
+
             const result = await response.json();
 
             if (result.success) {
               // Mark as uploaded
               await recordingBackup.markChunkUploaded(chunk.id);
+              totalUploaded++;
               console.log(`Recovery: Uploaded chunk ${chunk.chunkNumber}`);
+            } else {
+              totalFailed++;
+              console.error(`Recovery: Upload failed:`, result.message);
             }
           } catch (error) {
+            totalFailed++;
             console.error(`Recovery: Failed to upload chunk ${chunk.chunkNumber}:`, error);
           }
         }
-
-        // Mark session as recovered
-        await recordingBackup.saveMetadata(session.sessionId, {
-          ...session,
-          testInProgress: false,
-          recoveredAt: Date.now(),
-        });
       }
 
-      // Clear the session after successful recovery
+      // Clear the session data after attempting recovery
       await recordingBackup.clearSession(session.sessionId);
     } catch (error) {
       console.error(`Failed to recover session ${session.sessionId}:`, error);
@@ -1222,23 +1242,60 @@ window.attemptRecovery = async function() {
   }
 
   if (recoveryDiv) {
-    recoveryDiv.innerHTML = '<div class="recovery-content"><p>✓ Recovery complete!</p></div>';
-    setTimeout(() => recoveryDiv.remove(), 3000);
+    if (sessionNotFound) {
+      recoveryDiv.innerHTML = `
+        <div class="recovery-content">
+          <p>⚠️ Recovery failed: Server was restarted and session data was lost.</p>
+          <p style="font-size: 13px;">Uploaded: ${totalUploaded} | Failed: ${totalFailed}</p>
+          <p style="font-size: 13px;">The local recovery data has been cleared. Please contact your administrator if you need assistance.</p>
+          <button onclick="this.parentElement.parentElement.remove()">OK</button>
+        </div>`;
+    } else if (totalFailed > 0) {
+      recoveryDiv.innerHTML = `
+        <div class="recovery-content">
+          <p>⚠️ Partial recovery: ${totalUploaded} uploaded, ${totalFailed} failed</p>
+          <button onclick="this.parentElement.parentElement.remove()">OK</button>
+        </div>`;
+    } else {
+      recoveryDiv.innerHTML = '<div class="recovery-content"><p>✓ Recovery complete! All chunks uploaded successfully.</p></div>';
+      setTimeout(() => recoveryDiv.remove(), 3000);
+    }
   }
 
   window.unfinishedSessions = [];
 };
 
-window.dismissRecovery = function() {
+window.dismissRecovery = async function(deleteData = false) {
   const recoveryDiv = document.querySelector('.recovery-notification');
-  if (recoveryDiv) recoveryDiv.remove();
+
+  if (deleteData && window.unfinishedSessions && window.unfinishedSessions.length > 0) {
+    // Actually delete the data from IndexedDB
+    if (recoveryDiv) {
+      recoveryDiv.innerHTML = '<div class="recovery-content"><p>Deleting old recovery data...</p></div>';
+    }
+
+    for (const session of window.unfinishedSessions) {
+      try {
+        await recordingBackup.clearSession(session.sessionId);
+        console.log(`Cleared recovery data for session ${session.sessionId}`);
+      } catch (error) {
+        console.error(`Failed to clear session ${session.sessionId}:`, error);
+      }
+    }
+
+    if (recoveryDiv) {
+      recoveryDiv.innerHTML = '<div class="recovery-content"><p>✓ Old data deleted</p></div>';
+      setTimeout(() => recoveryDiv.remove(), 2000);
+    }
+  } else {
+    // Just dismiss the notification
+    if (recoveryDiv) recoveryDiv.remove();
+  }
+
   window.unfinishedSessions = [];
 };
 
-// Run recovery check on page load
-window.addEventListener('DOMContentLoaded', () => {
-  setTimeout(checkForRecovery, 2000); // Check after 2 seconds
-});
+// Recovery check is now called after successful login (see loginForm handler)
 
 // Mark test as in progress when starting
 window.markTestInProgress = function() {

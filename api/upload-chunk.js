@@ -19,7 +19,7 @@ module.exports = async (req, res) => {
     }
 
     try {
-      const { sessionId, deviceType, chunkNumber, timestamp } = fields;
+      const { sessionId, deviceType, chunkNumber, timestamp, recovery, email, studentId } = fields;
       const videoFile = files.video;
 
       if (!sessionId || !deviceType || !chunkNumber || !videoFile) {
@@ -29,7 +29,21 @@ module.exports = async (req, res) => {
         });
       }
 
-      const session = sessions.get(sessionId[0]);
+      let session = sessions.get(sessionId[0]);
+
+      // Handle recovery uploads: create temporary session if it doesn't exist
+      if (!session && recovery && recovery[0] === 'true' && email && studentId) {
+        console.log(`Recovery upload: Creating temporary session for ${email[0]}`);
+        session = {
+          sessionId: sessionId[0],
+          email: email[0],
+          studentId: studentId[0],
+          chunks: {},
+          isRecovery: true,
+        };
+        sessions.set(sessionId[0], session);
+      }
+
       if (!session) {
         return res.status(404).json({
           success: false,
