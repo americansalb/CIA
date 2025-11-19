@@ -169,6 +169,31 @@ function setupProctorPage() {
   checkProctorConnection();
 }
 
+// Email proctor info to phone
+function emailProctorInfo() {
+  if (!sessionData) return;
+
+  const url = `${window.location.origin}/proctor`;
+  const pin = sessionData.proctorPin;
+  const subject = encodeURIComponent('Proctor Setup for Your Exam');
+  const body = encodeURIComponent(`Hi,
+
+Here's the information to set up the proctor device for your exam:
+
+URL: ${url}
+PIN: ${pin}
+
+Instructions:
+1. Open this link on your phone/tablet
+2. Enter the PIN when prompted
+3. Grant camera permissions
+4. Position the device to show your workspace
+
+Good luck on your exam!`);
+
+  window.location.href = `mailto:?subject=${subject}&body=${body}`;
+}
+
 // Check if proctor device has connected
 async function checkProctorConnection() {
   if (!sessionData) return;
@@ -436,9 +461,9 @@ async function checkVideoQuality() {
             }
 
             // 3. Check if face is in upper-middle area (for shoulders to be visible)
-            // Face center should be around 35-45% from top
-            const idealCenterY = videoHeight * 0.40; // 40% from top
-            const verticalTolerance = videoHeight * 0.15; // ±15%
+            // Face center should be around 30-60% from top (more flexible)
+            const idealCenterY = videoHeight * 0.45; // 45% from top
+            const verticalTolerance = videoHeight * 0.20; // ±20%
             if (faceCenterY < idealCenterY - verticalTolerance) {
               issues.push('move down (too high)');
             } else if (faceCenterY > idealCenterY + verticalTolerance) {
@@ -537,7 +562,14 @@ showPage = async function(pageId) {
       }
 
       // Note: Proctor recorder will be managed by the proctor device
-      document.getElementById('proctorVideo').srcObject = null; // Will be handled separately
+      // Show placeholder for proctor video since it's on separate device
+      const proctorVideoContainer = document.getElementById('proctorVideo').parentElement;
+      const placeholder = document.createElement('div');
+      placeholder.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #999; font-size: 14px; padding: 20px;';
+      placeholder.innerHTML = '<div style="font-size: 48px; margin-bottom: 10px;">📱</div>Recording on<br>Second Device';
+      proctorVideoContainer.style.position = 'relative';
+      proctorVideoContainer.appendChild(placeholder);
+      document.getElementById('proctorVideo').style.display = 'none';
 
       // Start continuous quality monitoring during test
       startTestQualityMonitoring();
@@ -600,34 +632,57 @@ async function startTestQualityMonitoring() {
       lightingStatus.innerHTML = 'Lighting: <span style="color: #f44336;">⚠</span>';
     }
 
-    // Real face detection during test (same as setup)
+    // Real face detection during test (use canvas like in setup)
     if (faceDetector) {
       try {
-        const faces = await faceDetector.estimateFaces(mainVideo, {
+        const faces = await faceDetector.estimateFaces(canvas, {
           flipHorizontal: false,
         });
 
         if (faces && faces.length > 0) {
-          // Check if face is fully visible (not cut off at edges)
           const face = faces[0];
-          const box = face.box;
           const videoWidth = mainVideo.videoWidth;
           const videoHeight = mainVideo.videoHeight;
 
-          // Very minimal margin (2%) - only catches actual cutoffs
-          const marginX = videoWidth * 0.02;
-          const marginY = videoHeight * 0.02;
+          // Calculate bounding box from keypoints (same as setup page)
+          if (face.keypoints && face.keypoints.length > 0) {
+            let minX = Infinity, minY = Infinity;
+            let maxX = -Infinity, maxY = -Infinity;
 
-          const isFaceFullyVisible =
-            box.xMin > marginX &&
-            box.xMax < (videoWidth - marginX) &&
-            box.yMin > marginY &&
-            box.yMax < (videoHeight - marginY);
+            for (const kp of face.keypoints) {
+              if (kp.x < minX) minX = kp.x;
+              if (kp.x > maxX) maxX = kp.x;
+              if (kp.y < minY) minY = kp.y;
+              if (kp.y > maxY) maxY = kp.y;
+            }
 
-          if (isFaceFullyVisible) {
-            faceStatus.innerHTML = 'Face: <span style="color: #4caf50;">✓</span>';
+            const width = maxX - minX;
+            const height = maxY - minY;
+            const paddingX = width * 0.2;
+            const paddingY = height * 0.2;
+
+            const xMin = Math.max(0, minX - paddingX);
+            const yMin = Math.max(0, minY - paddingY);
+            const xMax = Math.min(videoWidth, maxX + paddingX);
+            const yMax = Math.min(videoHeight, maxY + paddingY);
+
+            // Simpler check during test - just ensure face is visible
+            const edgeMarginX = videoWidth * 0.02;
+            const edgeMarginY = videoHeight * 0.02;
+
+            const isFaceVisible =
+              xMin > edgeMarginX &&
+              xMax < (videoWidth - edgeMarginX) &&
+              yMin > edgeMarginY &&
+              yMax < (videoHeight - edgeMarginY);
+
+            if (isFaceVisible) {
+              faceStatus.innerHTML = 'Face: <span style="color: #4caf50;">✓</span>';
+            } else {
+              faceStatus.innerHTML = 'Face: <span style="color: #ff9800;">⚠ Edge</span>';
+            }
           } else {
-            faceStatus.innerHTML = 'Face: <span style="color: #ff9800;">⚠ Cut Off</span>';
+            faceStatus.innerHTML = 'Face: <span style="color: #f44336;">⚠</span>';
           }
         } else {
           faceStatus.innerHTML = 'Face: <span style="color: #f44336;">⚠</span>';

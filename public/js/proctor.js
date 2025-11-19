@@ -71,13 +71,15 @@ function showProctorPage(pageId) {
 }
 
 // Set up proctor camera verification page
+let currentFacingMode = 'user'; // Start with front camera (default for phone/tablet)
+
 async function setupProctorVerification() {
   try {
     proctorStream = await navigator.mediaDevices.getUserMedia({
       video: {
         width: { ideal: 1280 },
         height: { ideal: 720 },
-        facingMode: 'environment', // Use back camera on mobile if available
+        facingMode: currentFacingMode, // Use front camera by default
       },
       audio: {
         echoCancellation: true,
@@ -117,6 +119,44 @@ async function setupProctorVerification() {
   } catch (error) {
     console.error('Failed to access proctor camera:', error);
     alert('Failed to access camera. Please grant permissions and refresh.');
+  }
+}
+
+// Switch between front and back camera
+async function switchCamera() {
+  try {
+    // Stop current stream
+    if (proctorStream) {
+      proctorStream.getTracks().forEach(track => track.stop());
+    }
+
+    // Toggle facing mode
+    currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+
+    // Get new stream with switched camera
+    proctorStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        facingMode: currentFacingMode,
+      },
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        sampleRate: 48000,
+      },
+    });
+
+    // Update preview
+    const verificationVideo = document.getElementById('proctorVerificationView');
+    verificationVideo.srcObject = proctorStream;
+
+    console.log('Switched to', currentFacingMode, 'camera');
+  } catch (error) {
+    console.error('Failed to switch camera:', error);
+    alert('Failed to switch camera. Your device may only have one camera.');
+    // Try to restore previous camera
+    currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
   }
 }
 
