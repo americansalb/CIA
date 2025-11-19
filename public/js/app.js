@@ -364,6 +364,10 @@ async function checkVideoQuality() {
           const videoWidth = previewVideo.videoWidth;
           const videoHeight = previewVideo.videoHeight;
 
+          // Debug: log the raw box object to see what properties it actually has
+          console.log('Raw box object:', box);
+          console.log('Box properties - xMin:', box.xMin, 'yMin:', box.yMin, 'width:', box.width, 'height:', box.height);
+
           // MediaPipe Face Detector provides: xMin, yMin, width, height
           // Calculate xMax and yMax from these values
           const xMax = box.xMin + box.width;
