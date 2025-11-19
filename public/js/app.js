@@ -1361,15 +1361,27 @@ let socket = null;
 let mainStreamPeer = null;
 
 function initializeLiveMonitoring() {
-  if (!sessionData || !mainStream) {
-    console.warn('Cannot initialize live monitoring: missing session or stream');
-    return;
-  }
+  // Live monitoring is optional - don't break test if it fails
+  try {
+    if (!sessionData || !mainStream) {
+      console.warn('[Live Monitoring] Skipping: missing session or stream');
+      return;
+    }
 
-  console.log('Initializing live monitoring for session:', sessionData.sessionId);
+    // Check if io is available (Socket.io loaded)
+    if (typeof io === 'undefined') {
+      console.warn('[Live Monitoring] Socket.io not loaded - monitoring disabled');
+      return;
+    }
 
-  // Connect to Socket.io server
-  socket = io();
+    console.log('[Live Monitoring] Initializing for session:', sessionData.sessionId);
+
+    // Connect to Socket.io server
+    socket = io();
+
+    socket.on('connect_error', (error) => {
+      console.warn('[Live Monitoring] Connection error (non-fatal):', error.message);
+    });
 
   socket.on('connect', () => {
     console.log('Socket.io connected:', socket.id);
@@ -1415,19 +1427,30 @@ function initializeLiveMonitoring() {
   }, 3000); // Update every 3 seconds
 
   socket.on('disconnect', () => {
-    console.log('Socket.io disconnected');
+    console.log('[Live Monitoring] Disconnected');
   });
+  } catch (error) {
+    console.error('[Live Monitoring] Failed to initialize (non-fatal):', error);
+    console.log('[Live Monitoring] Test will continue without live monitoring');
+  }
 }
 
 function createPeerForAdmin(adminSocketId, deviceType, stream) {
-  console.log('Creating WebRTC peer for admin:', adminSocketId, deviceType);
+  try {
+    console.log('[Live Monitoring] Creating WebRTC peer for admin:', adminSocketId, deviceType);
 
-  // Create peer (student is initiator, sends stream to admin)
-  const peer = new SimplePeer({
-    initiator: true,
-    stream: stream,
-    trickle: false, // Send all ICE candidates at once
-  });
+    // Check if SimplePeer is available
+    if (typeof SimplePeer === 'undefined') {
+      console.warn('[Live Monitoring] SimplePeer library not loaded');
+      return;
+    }
+
+    // Create peer (student is initiator, sends stream to admin)
+    const peer = new SimplePeer({
+      initiator: true,
+      stream: stream,
+      trickle: false, // Send all ICE candidates at once
+    });
 
   // When peer generates signal, send to server
   peer.on('signal', (signal) => {
@@ -1454,4 +1477,7 @@ function createPeerForAdmin(adminSocketId, deviceType, stream) {
     targetSocketId: adminSocketId,
     deviceType: deviceType,
   };
+  } catch (error) {
+    console.error('[Live Monitoring] Failed to create peer (non-fatal):', error);
+  }
 }

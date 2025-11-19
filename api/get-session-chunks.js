@@ -56,21 +56,44 @@ module.exports = async (req, res) => {
 
     const chunks = filesResponse.data.files || [];
 
+    console.log(`[get-session-chunks] Found ${chunks.length} chunks for session ${sessionId}, device ${deviceType}`);
+
+    if (chunks.length === 0) {
+      console.log(`[get-session-chunks] No chunks found in folder ${sessionFolderId}`);
+      return res.json({
+        success: true,
+        chunks: [],
+      });
+    }
+
     // Sort chunks by number
     chunks.sort((a, b) => {
-      const numA = parseInt(a.name.match(/_chunk_(\d+)/)[1]);
-      const numB = parseInt(b.name.match(/_chunk_(\d+)/)[1]);
+      const matchA = a.name.match(/_chunk_(\d+)/);
+      const matchB = b.name.match(/_chunk_(\d+)/);
+      if (!matchA || !matchB) {
+        console.warn(`[get-session-chunks] Invalid chunk filename format: ${a.name} or ${b.name}`);
+        return 0;
+      }
+      const numA = parseInt(matchA[1]);
+      const numB = parseInt(matchB[1]);
       return numA - numB;
     });
 
     // Generate download URLs
-    const chunksWithUrls = chunks.map(chunk => ({
-      fileId: chunk.id,
-      fileName: chunk.name,
-      chunkNumber: parseInt(chunk.name.match(/_chunk_(\d+)/)[1]),
-      downloadUrl: `https://www.googleapis.com/drive/v3/files/${chunk.id}?alt=media`,
-      mimeType: chunk.mimeType,
-    }));
+    const chunksWithUrls = chunks.map(chunk => {
+      const match = chunk.name.match(/_chunk_(\d+)/);
+      if (!match) {
+        console.warn(`[get-session-chunks] Skipping invalid chunk filename: ${chunk.name}`);
+        return null;
+      }
+      return {
+        fileId: chunk.id,
+        fileName: chunk.name,
+        chunkNumber: parseInt(match[1]),
+        downloadUrl: `https://www.googleapis.com/drive/v3/files/${chunk.id}?alt=media`,
+        mimeType: chunk.mimeType,
+      };
+    }).filter(chunk => chunk !== null);
 
     res.json({
       success: true,
