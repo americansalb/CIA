@@ -599,9 +599,10 @@ async function startTestQualityMonitoring() {
   const mainVideo = document.getElementById('mainVideo');
   const monitorDiv = document.getElementById('testQualityMonitor');
   const faceStatus = document.getElementById('testFaceStatus');
-  const lightingStatus = document.getElementById('testLightingStatus');
+  const faceWarning = document.getElementById('faceWarning');
+  const faceWarningText = document.getElementById('faceWarningText');
 
-  if (!mainVideo || !monitorDiv) return;
+  if (!mainVideo || !monitorDiv || !faceWarning) return;
 
   monitorDiv.style.display = 'block';
 
@@ -680,19 +681,32 @@ async function startTestQualityMonitoring() {
               yMax < (videoHeight - edgeMarginY);
 
             if (isFaceVisible) {
-              faceStatus.innerHTML = 'Face: <span style="color: #4caf50;">✓</span>';
+              faceStatus.textContent = '✓ Face OK';
+              faceWarning.style.display = 'none';
+              monitorDiv.style.display = 'block';
             } else {
-              faceStatus.innerHTML = 'Face: <span style="color: #ff9800;">⚠ Edge</span>';
+              // CRITICAL: Show prominent warning
+              faceWarning.style.display = 'block';
+              faceWarningText.textContent = 'MOVE AWAY FROM EDGE - CENTER YOUR FACE';
+              monitorDiv.style.display = 'none';
             }
           } else {
-            faceStatus.innerHTML = 'Face: <span style="color: #f44336;">⚠</span>';
+            // CRITICAL: No face detected
+            faceWarning.style.display = 'block';
+            faceWarningText.textContent = 'FACE NOT DETECTED - POSITION YOURSELF IN VIEW';
+            monitorDiv.style.display = 'none';
           }
         } else {
-          faceStatus.innerHTML = 'Face: <span style="color: #f44336;">⚠</span>';
+          // No faces detected
+          faceWarning.style.display = 'block';
+          faceWarningText.textContent = 'FACE NOT DETECTED - POSITION YOURSELF IN VIEW';
+          monitorDiv.style.display = 'none';
         }
       } catch (error) {
         console.error('Test face detection error:', error);
-        faceStatus.innerHTML = 'Face: <span style="color: #999;">⚠</span>';
+        faceWarning.style.display = 'none';
+        monitorDiv.style.display = 'block';
+        faceStatus.textContent = '✓ Monitoring active';
       }
     }
   }, 2500); // Check every 2.5 seconds during test

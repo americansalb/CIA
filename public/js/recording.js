@@ -337,7 +337,8 @@ class RecordingManager {
         // Mark as uploaded in IndexedDB
         await recordingBackup.markChunkUploaded(chunkId);
 
-        this.showNotification(`Chunk ${chunkNumber} saved`, 'success', 2000);
+        // Silent success - don't notify user about technical chunks
+        console.log(`[${this.deviceType}] Chunk ${chunkNumber} uploaded successfully`);
       } else {
         // If upload failed after retries, keep in queue and try again later
         console.warn(`[${this.deviceType}] Chunk ${chunkNumber} upload failed, will retry later`);
@@ -388,10 +389,10 @@ class RecordingManager {
       const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
       console.log(`[${this.deviceType}] CRITICAL: Chunk ${chunkNumber} upload failed. Retrying in ${delay}ms... (attempt ${attempt})`);
 
-      if (attempt === 1) {
-        this.showNotification(`Upload failed - retrying chunk ${chunkNumber}...`, 'warning', 5000);
-      } else if (attempt >= 5) {
-        this.showNotification(`CRITICAL: Still retrying chunk ${chunkNumber} (attempt ${attempt})`, 'error', 0);
+      // Silent retry - don't show technical details to user
+      // Only show critical issues after many attempts
+      if (attempt >= 10) {
+        this.showNotification(`Connection issue - saving data locally`, 'warning', 5000);
       }
 
       await new Promise(resolve => setTimeout(resolve, delay));
@@ -460,7 +461,7 @@ class RecordingManager {
 
     // CRITICAL: Wait for ALL chunks to upload - NEVER proceed with pending uploads
     console.log(`[${this.deviceType}] Waiting for all chunks to upload...`);
-    this.showNotification('Waiting for all data to upload - DO NOT CLOSE BROWSER', 'warning', 0);
+    this.showNotification('Finalizing upload - please wait...', 'info', 0);
 
     let waitCount = 0;
     while (this.uploadQueue.length > 0) {
@@ -468,7 +469,9 @@ class RecordingManager {
       if (waitCount % 10 === 0) {
         const status = this.getUploadStatus();
         console.log(`[${this.deviceType}] Still waiting... Pending: ${status.pendingUploads}, Uploaded: ${status.uploadedChunks}/${status.totalChunks}`);
-        this.showNotification(`Uploading... ${status.uploadedChunks}/${status.totalChunks} chunks complete`, 'warning', 0);
+        // Show simple progress to user
+        const percentComplete = Math.floor((status.uploadedChunks / status.totalChunks) * 100);
+        this.showNotification(`Uploading... ${percentComplete}% complete`, 'info', 0);
       }
       await new Promise(resolve => setTimeout(resolve, 1000));
       await this.processUploadQueue();
@@ -478,7 +481,7 @@ class RecordingManager {
     const unuploaded = await recordingBackup.getUnuploadedChunks(this.sessionId);
     if (unuploaded.length > 0) {
       console.error(`[${this.deviceType}] CRITICAL: ${unuploaded.length} chunks still not uploaded!`);
-      this.showNotification(`CRITICAL: ${unuploaded.length} chunks not uploaded - retrying...`, 'error', 0);
+      this.showNotification(`Completing upload - please wait...`, 'info', 0);
 
       // Add them back to queue
       for (const chunk of unuploaded) {
@@ -497,7 +500,7 @@ class RecordingManager {
     }
 
     console.log(`[${this.deviceType}] All chunks uploaded successfully`);
-    this.showNotification('All data uploaded successfully!', 'success', 3000);
+    this.showNotification('Upload complete!', 'success', 2000);
   }
 
   async uploadFinalVideo(interventionCount = 0) {
