@@ -400,35 +400,61 @@ async function checkVideoQuality() {
 
             console.log('Calculated bounding box from keypoints:', {xMin, yMin, xMax, yMax});
 
+            // Calculate face center and size
+            const faceCenterX = (xMin + xMax) / 2;
+            const faceCenterY = (yMin + yMax) / 2;
+            const faceWidth = xMax - xMin;
+            const faceHeight = yMax - yMin;
+
+            const videoCenterX = videoWidth / 2;
+            const videoCenterY = videoHeight / 2;
+
             // Debug: log face position
-            const margins = {
-              left: xMin,
-              right: videoWidth - xMax,
-              top: yMin,
-              bottom: videoHeight - yMax
-            };
-            console.log('Face margins from edges (px):', margins);
+            console.log('Face center:', {x: faceCenterX, y: faceCenterY});
+            console.log('Video center:', {x: videoCenterX, y: videoCenterY});
+            console.log('Face size:', {width: faceWidth, height: faceHeight});
 
-            // Very minimal margin (2%) - only catches actual cutoffs at frame edges
-            const marginX = videoWidth * 0.02;
-            const marginY = videoHeight * 0.02;
+            const issues = [];
 
-            const isFaceFullyVisible =
-              xMin > marginX &&
-              xMax < (videoWidth - marginX) &&
-              yMin > marginY &&
-              yMax < (videoHeight - marginY);
+            // 1. Check if face is cut off at edges (2% margin)
+            const edgeMarginX = videoWidth * 0.02;
+            const edgeMarginY = videoHeight * 0.02;
+            if (xMin <= edgeMarginX) issues.push('too close to left edge');
+            if (xMax >= (videoWidth - edgeMarginX)) issues.push('too close to right edge');
+            if (yMin <= edgeMarginY) issues.push('too close to top edge');
+            if (yMax >= (videoHeight - edgeMarginY)) issues.push('too close to bottom edge');
 
-            if (isFaceFullyVisible) {
-              faceDetected.innerHTML = '<span style="color: #4caf50;">✓ Face Fully Visible</span>';
+            // 2. Check if face is horizontally centered (within 25% tolerance)
+            const horizontalOffset = Math.abs(faceCenterX - videoCenterX);
+            const maxHorizontalOffset = videoWidth * 0.25;
+            if (horizontalOffset > maxHorizontalOffset) {
+              if (faceCenterX < videoCenterX) {
+                issues.push('move right to center');
+              } else {
+                issues.push('move left to center');
+              }
+            }
+
+            // 3. Check if face is in upper-middle area (for shoulders to be visible)
+            // Face center should be around 35-45% from top
+            const idealCenterY = videoHeight * 0.40; // 40% from top
+            const verticalTolerance = videoHeight * 0.15; // ±15%
+            if (faceCenterY < idealCenterY - verticalTolerance) {
+              issues.push('move down (too high)');
+            } else if (faceCenterY > idealCenterY + verticalTolerance) {
+              issues.push('move up (too low)');
+            }
+
+            // 4. Check if face is large enough (at least 15% of video width)
+            const minFaceWidth = videoWidth * 0.15;
+            if (faceWidth < minFaceWidth) {
+              issues.push('move closer to camera');
+            }
+
+            if (issues.length === 0) {
+              faceDetected.innerHTML = '<span style="color: #4caf50;">✓ Perfect Position</span>';
             } else {
-              // Show which edge is the problem
-              const issues = [];
-              if (xMin <= marginX) issues.push('left');
-              if (xMax >= (videoWidth - marginX)) issues.push('right');
-              if (yMin <= marginY) issues.push('top');
-              if (yMax >= (videoHeight - marginY)) issues.push('bottom');
-              faceDetected.innerHTML = `<span style="color: #ff9800;">⚠ Too close to ${issues.join(', ')} edge</span>`;
+              faceDetected.innerHTML = `<span style="color: #ff9800;">⚠ ${issues[0]}</span>`;
             }
           } else {
             faceDetected.innerHTML = '<span style="color: #ff9800;">⚠ No Keypoints Detected</span>';
