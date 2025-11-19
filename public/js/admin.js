@@ -161,8 +161,12 @@ function createRecordingCard(recording) {
       </div>
 
       <div class="video-links">
-        ${mainVideo ? `<a href="${mainVideo.webViewLink}" target="_blank" class="video-link">📹 Main Camera</a>` : ''}
-        ${proctorVideo ? `<a href="${proctorVideo.webViewLink}" target="_blank" class="video-link">📹 Proctor Camera</a>` : ''}
+        ${mainVideo ? `<button class="video-link" onclick="openVideoPlayer('${recording.sessionId}', 'main', '${recording.email}')">▶️ View Main Camera</button>` : ''}
+        ${proctorVideo ? `<button class="video-link" onclick="openVideoPlayer('${recording.sessionId}', 'proctor', '${recording.email}')">▶️ View Proctor Camera</button>` : ''}
+      </div>
+      <div class="video-links" style="margin-top: 10px;">
+        ${mainVideo ? `<a href="${mainVideo.webViewLink}" target="_blank" class="video-link" style="background: #6c757d; font-size: 13px; padding: 8px 16px;">📂 Main on Drive</a>` : ''}
+        ${proctorVideo ? `<a href="${proctorVideo.webViewLink}" target="_blank" class="video-link" style="background: #6c757d; font-size: 13px; padding: 8px 16px;">📂 Proctor on Drive</a>` : ''}
       </div>
 
       ${interventionsList}
@@ -243,4 +247,147 @@ function formatDuration(seconds) {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${mins}m ${secs}s`;
+}
+
+// ====================
+// VIDEO PLAYER
+// ====================
+
+let currentChunks = [];
+let currentChunkIndex = 0;
+let currentSession = null;
+let currentDevice = null;
+let videoElement = null;
+
+async function openVideoPlayer(sessionId, deviceType, studentEmail) {
+  currentSession = sessionId;
+  currentDevice = deviceType;
+  currentChunkIndex = 0;
+
+  const modal = document.getElementById('videoPlayerModal');
+  const title = document.getElementById('videoPlayerTitle');
+  const videoLoading = document.getElementById('videoLoading');
+  const chunkListContainer = document.getElementById('chunkListContainer');
+
+  videoElement = document.getElementById('chunkVideo');
+
+  title.textContent = `${studentEmail} - ${deviceType === 'main' ? 'Main' : 'Proctor'} Camera`;
+  modal.classList.add('active');
+  videoLoading.style.display = 'block';
+  videoElement.style.display = 'none';
+
+  try {
+    // Fetch chunks from server
+    const response = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
+    const result = await response.json();
+
+    if (result.success && result.chunks.length > 0) {
+      currentChunks = result.chunks;
+
+      // Update totals
+      document.getElementById('totalChunks').textContent = currentChunks.length;
+
+      // Build chunk list
+      chunkListContainer.innerHTML = currentChunks.map((chunk, index) => `
+        <div class="chunk-item ${index === 0 ? 'active' : ''}" id="chunk-item-${index}" onclick="jumpToChunk(${index})">
+          Chunk ${chunk.chunkNumber}
+          <div style="font-size: 11px; color: #888;">Click to play</div>
+        </div>
+      `).join('');
+
+      // Play first chunk
+      await playChunk(0);
+    } else {
+      videoLoading.textContent = 'No chunks found for this recording';
+    }
+  } catch (error) {
+    console.error('Error loading chunks:', error);
+    videoLoading.textContent = 'Error loading video chunks';
+  }
+}
+
+async function playChunk(index) {
+  if (index < 0 || index >= currentChunks.length) return;
+
+  currentChunkIndex = index;
+  const chunk = currentChunks[index];
+
+  const videoLoading = document.getElementById('videoLoading');
+  const currentChunkNum = document.getElementById('currentChunkNum');
+  const prevBtn = document.getElementById('prevChunkBtn');
+  const nextBtn = document.getElementById('nextChunkBtn');
+
+  // Update UI
+  currentChunkNum.textContent = index + 1;
+  prevBtn.disabled = index === 0;
+  nextBtn.disabled = index === currentChunks.length - 1;
+
+  // Update chunk list
+  document.querySelectorAll('.chunk-item').forEach((item, i) => {
+    item.classList.toggle('active', i === index);
+    if (i <= index) item.classList.add('loaded');
+  });
+
+  // Load video
+  videoLoading.style.display = 'block';
+  videoLoading.textContent = `Loading chunk ${index + 1}...`;
+  videoElement.style.display = 'none';
+
+  try {
+    // Set video source
+    videoElement.src = chunk.downloadUrl;
+    videoElement.load();
+
+    // Wait for video to be ready
+    await new Promise((resolve, reject) => {
+      videoElement.onloadeddata = resolve;
+      videoElement.onerror = reject;
+    });
+
+    videoLoading.style.display = 'none';
+    videoElement.style.display = 'block';
+    videoElement.play();
+
+    // Auto-play next chunk when this one ends
+    videoElement.onended = () => {
+      if (currentChunkIndex < currentChunks.length - 1) {
+        playNextChunk();
+      }
+    };
+  } catch (error) {
+    console.error('Error playing chunk:', error);
+    videoLoading.textContent = `Error loading chunk ${index + 1}`;
+  }
+}
+
+function playNextChunk() {
+  if (currentChunkIndex < currentChunks.length - 1) {
+    playChunk(currentChunkIndex + 1);
+  }
+}
+
+function playPreviousChunk() {
+  if (currentChunkIndex > 0) {
+    playChunk(currentChunkIndex - 1);
+  }
+}
+
+function jumpToChunk(index) {
+  playChunk(index);
+}
+
+function closeVideoPlayer() {
+  const modal = document.getElementById('videoPlayerModal');
+  modal.classList.remove('active');
+
+  // Stop video
+  if (videoElement) {
+    videoElement.pause();
+    videoElement.src = '';
+  }
+
+  currentChunks = [];
+  currentChunkIndex = 0;
+  currentSession = null;
+  currentDevice = null;
 }
