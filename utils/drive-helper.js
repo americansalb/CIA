@@ -13,6 +13,8 @@ async function findOrCreateFolder(parentFolderId, folderName) {
       q: query,
       fields: 'files(id, name)',
       spaces: 'drive',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     });
 
     if (searchResponse.data.files && searchResponse.data.files.length > 0) {
@@ -29,6 +31,7 @@ async function findOrCreateFolder(parentFolderId, folderName) {
     const folder = await drive.files.create({
       resource: fileMetadata,
       fields: 'id',
+      supportsAllDrives: true,
     });
 
     return folder.data.id;
@@ -55,6 +58,7 @@ async function uploadFile(filePath, fileName, folderId, mimeType = 'video/webm')
     resource: fileMetadata,
     media: media,
     fields: 'id, name, webViewLink',
+    supportsAllDrives: true,
   });
 
   return {
@@ -87,6 +91,7 @@ async function uploadBuffer(buffer, fileName, folderId, mimeType = 'video/webm')
       resource: fileMetadata,
       media: media,
       fields: 'id, name, webViewLink',
+      supportsAllDrives: true,
     });
 
     return {
@@ -109,6 +114,8 @@ async function listRecordings(folderId) {
     q: query,
     fields: 'files(id, name, createdTime, webViewLink, mimeType)',
     orderBy: 'createdTime desc',
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
   });
 
   return response.data.files || [];
