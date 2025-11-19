@@ -559,6 +559,7 @@
 
       <!-- Tab Navigation -->
       <div class="tab-nav">
+        <button class="tab-btn" onclick="switchTab('live')">🔴 Live Monitoring</button>
         <button class="tab-btn active" onclick="switchTab('recordings')">Recordings</button>
         <button class="tab-btn" onclick="switchTab('tests')">Manage Tests</button>
       </div>
@@ -586,6 +587,22 @@
         </div>
       </div>
 
+      <!-- Live Monitoring Tab -->
+      <div id="liveTab" class="tab-content">
+        <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h2 style="margin: 0 0 10px 0;">🔴 Live Test Monitoring</h2>
+          <p style="color: #666; margin: 0;">Real-time video streams from students currently taking tests. Click "Monitor" to view their cameras.</p>
+        </div>
+
+        <div id="activeSessionsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 20px;">
+          <div style="grid-column: 1/-1; text-align: center; padding: 60px; color: #999;">
+            <div style="font-size: 64px; margin-bottom: 20px;">📺</div>
+            <p style="font-size: 18px; margin: 0;">No active tests at the moment</p>
+            <p style="font-size: 14px; margin-top: 10px;">Students will appear here when they start their tests</p>
+          </div>
+        </div>
+      </div>
+
       <!-- Tests Tab -->
       <div id="testsTab" class="tab-content">
         <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
@@ -599,6 +616,30 @@
       </div>
     </div>
 
+  </div>
+
+  <!-- Live Stream Modal -->
+  <div id="liveStreamModal" class="video-player-modal">
+    <div class="video-player-container" style="max-width: 1200px;">
+      <div class="video-player-header">
+        <h3 id="liveStreamTitle">Live Monitoring</h3>
+        <button class="close-player-btn" onclick="closeLiveStream()">✕ Close</button>
+      </div>
+      <div class="video-player-body">
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 15px; min-height: 500px;">
+          <div style="background: #000; border-radius: 8px; position: relative; display: flex; align-items: center; justify-content: center;">
+            <video id="liveMainCamera" autoplay playsinline style="width: 100%; height: 100%; border-radius: 8px;"></video>
+            <div id="liveStreamStatus" style="position: absolute; top: 10px; left: 10px; background: rgba(255, 0, 0, 0.8); color: white; padding: 6px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;">
+              🔴 LIVE
+            </div>
+          </div>
+          <div style="background: #f5f5f5; border-radius: 8px; padding: 20px;">
+            <h4 style="margin: 0 0 15px 0;">Session Info</h4>
+            <div id="liveSessionInfo"></div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Video Player Modal -->
@@ -630,6 +671,12 @@
       </div>
     </div>
   </div>
+
+  <!-- Socket.io for live monitoring -->
+  <script src="/socket.io/socket.io.js"></script>
+
+  <!-- Simple-peer for WebRTC -->
+  <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
 
   <script src="/js/admin.js"></script>
   <script src="/js/test-manager.js"></script>

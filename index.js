@@ -1,8 +1,12 @@
 require('dotenv').config();
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 const path = require('path');
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 
 // Middleware
@@ -43,6 +47,105 @@ app.get('/proctor', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'proctor.html'));
 });
 
-app.listen(PORT, () => {
+// Socket.io for live monitoring and WebRTC signaling
+const activeSessions = new Map(); // Track active test sessions
+
+io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+
+  // Student joins with session info
+  socket.on('join-session', ({ sessionId, email, role }) => {
+    console.log(`${role} joined session:`, sessionId, email);
+
+    socket.join(sessionId);
+    socket.sessionId = sessionId;
+    socket.email = email;
+    socket.role = role; // 'student' or 'admin'
+
+    // Track active session
+    if (role === 'student') {
+      if (!activeSessions.has(sessionId)) {
+        activeSessions.set(sessionId, {
+          sessionId,
+          email,
+          connectedAt: new Date(),
+          studentSocketId: socket.id,
+        });
+      }
+
+      // Notify all admins about active sessions
+      io.emit('active-sessions', Array.from(activeSessions.values()));
+    }
+  });
+
+  // WebRTC Signaling - relay signals between peers
+  socket.on('signal', ({ sessionId, targetSocketId, signal, deviceType }) => {
+    console.log(`Relaying signal for session ${sessionId}, device ${deviceType}`);
+
+    // Forward signal to target socket (admin or student)
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('signal', {
+        sessionId,
+        fromSocketId: socket.id,
+        signal,
+        deviceType,
+        email: socket.email,
+      });
+    } else {
+      // Broadcast to all in room (for initial connection)
+      socket.to(sessionId).emit('signal', {
+        sessionId,
+        fromSocketId: socket.id,
+        signal,
+        deviceType,
+        email: socket.email,
+      });
+    }
+  });
+
+  // Admin requests to monitor a student
+  socket.on('monitor-student', ({ sessionId }) => {
+    console.log(`Admin ${socket.id} monitoring session ${sessionId}`);
+    socket.join(sessionId);
+
+    // Notify student that admin is monitoring
+    const session = activeSessions.get(sessionId);
+    if (session && session.studentSocketId) {
+      io.to(session.studentSocketId).emit('admin-monitoring', {
+        adminSocketId: socket.id,
+      });
+    }
+  });
+
+  // Session progress updates (current segment, time, etc)
+  socket.on('session-update', (data) => {
+    const session = activeSessions.get(socket.sessionId);
+    if (session) {
+      session.currentSegment = data.currentSegment;
+      session.totalSegments = data.totalSegments;
+      session.elapsedTime = data.elapsedTime;
+
+      // Broadcast update to admins
+      io.emit('session-progress', {
+        sessionId: socket.sessionId,
+        ...data,
+      });
+    }
+  });
+
+  // Handle disconnection
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+
+    // Remove from active sessions if student
+    if (socket.role === 'student' && socket.sessionId) {
+      activeSessions.delete(socket.sessionId);
+      io.emit('active-sessions', Array.from(activeSessions.values()));
+    }
+  });
+});
+
+server.listen(PORT, () => {
   console.log(`CIA Assessment Server running on port ${PORT}`);
+  console.log(`WebSocket server ready for live monitoring`);
 });

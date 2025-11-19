@@ -590,6 +590,9 @@ showPage = async function(pageId) {
       // Mark test as in progress for data loss prevention
       markTestInProgress();
 
+      // Initialize live monitoring with WebRTC
+      initializeLiveMonitoring();
+
       // Load first segment
       loadSegment(0);
     }
@@ -1351,3 +1354,104 @@ window.markTestComplete = function() {
     });
   }
 };
+
+// ==================== LIVE MONITORING WITH WEBRTC ====================
+
+let socket = null;
+let mainStreamPeer = null;
+
+function initializeLiveMonitoring() {
+  if (!sessionData || !mainStream) {
+    console.warn('Cannot initialize live monitoring: missing session or stream');
+    return;
+  }
+
+  console.log('Initializing live monitoring for session:', sessionData.sessionId);
+
+  // Connect to Socket.io server
+  socket = io();
+
+  socket.on('connect', () => {
+    console.log('Socket.io connected:', socket.id);
+
+    // Join session as student
+    socket.emit('join-session', {
+      sessionId: sessionData.sessionId,
+      email: sessionData.email,
+      role: 'student',
+    });
+  });
+
+  // Handle admin monitoring request
+  socket.on('admin-monitoring', ({ adminSocketId }) => {
+    console.log('Admin is monitoring this session:', adminSocketId);
+
+    // Create WebRTC peer to stream main camera to admin
+    if (mainStream) {
+      createPeerForAdmin(adminSocketId, 'main', mainStream);
+    }
+  });
+
+  // Handle WebRTC signaling from admin
+  socket.on('signal', ({ fromSocketId, signal, deviceType }) => {
+    console.log('Received signal from admin:', fromSocketId, deviceType);
+
+    // If we have a peer for this admin, forward the signal
+    if (mainStreamPeer && mainStreamPeer.targetSocketId === fromSocketId) {
+      mainStreamPeer.peer.signal(signal);
+    }
+  });
+
+  // Send session progress updates periodically
+  setInterval(() => {
+    if (socket && socket.connected) {
+      socket.emit('session-update', {
+        sessionId: sessionData.sessionId,
+        currentSegment: currentSegment,
+        totalSegments: totalSegments,
+        elapsedTime: testStartTime ? Math.floor((Date.now() - testStartTime) / 1000) : 0,
+      });
+    }
+  }, 3000); // Update every 3 seconds
+
+  socket.on('disconnect', () => {
+    console.log('Socket.io disconnected');
+  });
+}
+
+function createPeerForAdmin(adminSocketId, deviceType, stream) {
+  console.log('Creating WebRTC peer for admin:', adminSocketId, deviceType);
+
+  // Create peer (student is initiator, sends stream to admin)
+  const peer = new SimplePeer({
+    initiator: true,
+    stream: stream,
+    trickle: false, // Send all ICE candidates at once
+  });
+
+  // When peer generates signal, send to server
+  peer.on('signal', (signal) => {
+    console.log('Sending signal to admin');
+    socket.emit('signal', {
+      sessionId: sessionData.sessionId,
+      targetSocketId: adminSocketId,
+      signal: signal,
+      deviceType: deviceType,
+    });
+  });
+
+  peer.on('connect', () => {
+    console.log('WebRTC peer connected to admin');
+  });
+
+  peer.on('error', (err) => {
+    console.error('WebRTC peer error:', err);
+  });
+
+  // Store peer reference
+  mainStreamPeer = {
+    peer: peer,
+    targetSocketId: adminSocketId,
+    deviceType: deviceType,
+  };
+}

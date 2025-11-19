@@ -400,3 +400,258 @@ function closeVideoPlayer() {
   currentSession = null;
   currentDevice = null;
 }
+
+
+// ==================== LIVE MONITORING WITH WEBRTC ====================
+
+let adminSocket = null;
+let activeSessions = [];
+let monitoringPeers = new Map(); // sessionId -> peer object
+let currentlyMonitoring = null;
+
+function switchTab(tabName) {
+  // Hide all tabs
+  document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+
+  // Show selected tab
+  if (tabName === 'live') {
+    document.getElementById('liveTab').classList.add('active');
+    event.target.classList.add('active');
+    initializeLiveMonitoring();
+  } else if (tabName === 'recordings') {
+    document.getElementById('recordingsTab').classList.add('active');
+    event.target.classList.add('active');
+  } else if (tabName === 'tests') {
+    document.getElementById('testsTab').classList.add('active');
+    event.target.classList.add('active');
+  }
+}
+
+function initializeLiveMonitoring() {
+  if (adminSocket && adminSocket.connected) {
+    console.log('Already connected to live monitoring');
+    return;
+  }
+
+  console.log('Initializing live monitoring...');
+
+  // Connect to Socket.io
+  adminSocket = io();
+
+  adminSocket.on('connect', () => {
+    console.log('Admin Socket.io connected:', adminSocket.id);
+
+    // Join as admin
+    adminSocket.emit('join-session', {
+      sessionId: 'admin',
+      email: adminEmail,
+      role: 'admin',
+    });
+  });
+
+  // Receive list of active sessions
+  adminSocket.on('active-sessions', (sessions) => {
+    console.log('Active sessions updated:', sessions);
+    activeSessions = sessions;
+    renderActiveSessions();
+  });
+
+  // Receive session progress updates
+  adminSocket.on('session-progress', (update) => {
+    console.log('Session progress:', update);
+    updateSessionProgress(update);
+  });
+
+  // Receive WebRTC signals from students
+  adminSocket.on('signal', ({ fromSocketId, signal, deviceType, sessionId, email }) => {
+    console.log('Received signal from student:', sessionId, deviceType);
+
+    // Create peer to receive stream if we're monitoring this student
+    if (currentlyMonitoring && currentlyMonitoring.sessionId === sessionId) {
+      handleStudentSignal(fromSocketId, signal, deviceType, sessionId, email);
+    }
+  });
+
+  adminSocket.on('disconnect', () => {
+    console.log('Admin Socket.io disconnected');
+  });
+}
+
+function renderActiveSessions() {
+  const container = document.getElementById('activeSessionsContainer');
+
+  if (activeSessions.length === 0) {
+    container.innerHTML = `
+      <div style="grid-column: 1/-1; text-align: center; padding: 60px; color: #999;">
+        <div style="font-size: 64px; margin-bottom: 20px;">📺</div>
+        <p style="font-size: 18px; margin: 0;">No active tests at the moment</p>
+        <p style="font-size: 14px; margin-top: 10px;">Students will appear here when they start their tests</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = activeSessions.map(session => createSessionCard(session)).join('');
+}
+
+function createSessionCard(session) {
+  const elapsed = session.elapsedTime || 0;
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+  const timeStr = minutes + ':' + String(seconds).padStart(2, '0');
+
+  return `
+    <div class="recording-card" style="position: relative;">
+      <div class="recording-header">
+        <div>
+          <h2 style="margin: 0; color: #333;">${session.email}</h2>
+          <p style="margin: 5px 0 0 0; color: #666;">Session: ${session.sessionId.substring(0, 8)}...</p>
+        </div>
+        <span style="padding: 6px 12px; background: #4caf50; color: white; border-radius: 20px; font-size: 14px; font-weight: 600;">
+          🔴 LIVE
+        </span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 15px 0;">
+        <div style="text-align: center; padding: 10px; background: #f5f5f5; border-radius: 6px;">
+          <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Segment</div>
+          <div style="font-size: 20px; font-weight: 600; color: #333;">${session.currentSegment || 0}/${session.totalSegments || 0}</div>
+        </div>
+        <div style="text-align: center; padding: 10px; background: #f5f5f5; border-radius: 6px;">
+          <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Elapsed</div>
+          <div style="font-size: 20px; font-weight: 600; color: #333;">${timeStr}</div>
+        </div>
+      </div>
+
+      <button onclick="monitorStudent('${session.sessionId}', '${session.email}')" style="width: 100%; padding: 12px; background: #667eea; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; cursor: pointer; transition: transform 0.2s;">
+        📹 Monitor Live Stream
+      </button>
+    </div>
+  `;
+}
+
+function updateSessionProgress(update) {
+  const session = activeSessions.find(s => s.sessionId === update.sessionId);
+  if (session) {
+    session.currentSegment = update.currentSegment;
+    session.totalSegments = update.totalSegments;
+    session.elapsedTime = update.elapsedTime;
+    renderActiveSessions();
+
+    // Update modal if currently monitoring this session
+    if (currentlyMonitoring && currentlyMonitoring.sessionId === update.sessionId) {
+      updateLiveSessionInfo(update);
+    }
+  }
+}
+
+function monitorStudent(sessionId, email) {
+  console.log('Starting to monitor student:', sessionId, email);
+
+  currentlyMonitoring = { sessionId, email };
+
+  // Show modal
+  const modal = document.getElementById('liveStreamModal');
+  const title = document.getElementById('liveStreamTitle');
+
+  title.textContent = `Live Monitoring - ${email}`;
+  modal.classList.add('active');
+
+  // Request to monitor this student
+  adminSocket.emit('monitor-student', { sessionId });
+
+  // Show session info
+  const session = activeSessions.find(s => s.sessionId === sessionId);
+  if (session) {
+    updateLiveSessionInfo(session);
+  }
+}
+
+function handleStudentSignal(fromSocketId, signal, deviceType, sessionId, email) {
+  console.log('Handling student signal for device:', deviceType);
+
+  // Create peer to receive stream (admin is not initiator)
+  const peer = new SimplePeer({
+    initiator: false,
+    trickle: false,
+  });
+
+  // Handle incoming stream
+  peer.on('stream', (stream) => {
+    console.log('Received stream from student:', deviceType);
+
+    // Display stream
+    const videoElement = document.getElementById('liveMainCamera');
+    videoElement.srcObject = stream;
+  });
+
+  peer.on('error', (err) => {
+    console.error('WebRTC peer error:', err);
+  });
+
+  // Send signal back to student
+  peer.on('signal', (answerSignal) => {
+    console.log('Sending answer signal to student');
+    adminSocket.emit('signal', {
+      sessionId: sessionId,
+      targetSocketId: fromSocketId,
+      signal: answerSignal,
+      deviceType: deviceType,
+    });
+  });
+
+  // Process student's signal
+  peer.signal(signal);
+
+  // Store peer
+  monitoringPeers.set(sessionId + '_' + deviceType, peer);
+}
+
+function updateLiveSessionInfo(session) {
+  const container = document.getElementById('liveSessionInfo');
+  const elapsed = session.elapsedTime || 0;
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+  const timeStr = minutes + ':' + String(seconds).padStart(2, '0');
+
+  container.innerHTML = `
+    <div style="margin-bottom: 15px;">
+      <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Email</div>
+      <div style="font-size: 14px; font-weight: 600; color: #333;">${session.email}</div>
+    </div>
+    <div style="margin-bottom: 15px;">
+      <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Current Segment</div>
+      <div style="font-size: 14px; font-weight: 600; color: #333;">${session.currentSegment || 0} of ${session.totalSegments || 0}</div>
+    </div>
+    <div style="margin-bottom: 15px;">
+      <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Elapsed Time</div>
+      <div style="font-size: 14px; font-weight: 600; color: #333;">${timeStr}</div>
+    </div>
+    <div style="margin-bottom: 15px;">
+      <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Session ID</div>
+      <div style="font-size: 12px; font-family: monospace; color: #333;">${session.sessionId}</div>
+    </div>
+  `;
+}
+
+function closeLiveStream() {
+  const modal = document.getElementById('liveStreamModal');
+  modal.classList.remove('active');
+
+  // Stop all peer connections
+  if (currentlyMonitoring) {
+    const mainPeerKey = currentlyMonitoring.sessionId + '_main';
+    const peer = monitoringPeers.get(mainPeerKey);
+    if (peer) {
+      peer.destroy();
+      monitoringPeers.delete(mainPeerKey);
+    }
+  }
+
+  // Clear video
+  const videoElement = document.getElementById('liveMainCamera');
+  videoElement.srcObject = null;
+
+  currentlyMonitoring = null;
+}
