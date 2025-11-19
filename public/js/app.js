@@ -353,6 +353,11 @@ async function checkVideoQuality() {
 
     if (faceDetector) {
       try {
+        // Debug: check video state
+        console.log('Video dimensions:', previewVideo.videoWidth, 'x', previewVideo.videoHeight);
+        console.log('Video readyState:', previewVideo.readyState);
+        console.log('Video paused:', previewVideo.paused);
+
         const faces = await faceDetector.estimateFaces(previewVideo, {
           flipHorizontal: false,
         });
