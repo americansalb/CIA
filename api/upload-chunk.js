@@ -4,7 +4,7 @@ const { findOrCreateFolder, uploadBuffer } = require('../utils/drive-helper');
 const { sessions } = require('./create-session');
 
 module.exports = async (req, res) => {
-  const form = formidable({
+  const form = new formidable.IncomingForm({
     maxFileSize: 100 * 1024 * 1024, // 100MB max per chunk
     keepExtensions: true,
   });
