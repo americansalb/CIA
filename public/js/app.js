@@ -360,6 +360,11 @@ async function checkVideoQuality() {
         if (faces && faces.length > 0) {
           // Check if face is fully visible (not cut off at edges)
           const face = faces[0];
+
+          // Debug: log the ENTIRE face object to see all available properties
+          console.log('FULL face object:', face);
+          console.log('Face object keys:', Object.keys(face));
+
           const box = face.box;
           const videoWidth = previewVideo.videoWidth;
           const videoHeight = previewVideo.videoHeight;
