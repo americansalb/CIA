@@ -90,6 +90,11 @@
       color: #155724;
     }
 
+    .status-incomplete {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
     .video-links {
       display: flex;
       gap: 10px;
@@ -565,6 +570,7 @@
           <select id="statusFilter" onchange="filterRecordings()">
             <option value="all">All Recordings</option>
             <option value="pending_review">Pending Review</option>
+            <option value="incomplete">Incomplete (Left Early)</option>
             <option value="graded">Graded</option>
           </select>
 

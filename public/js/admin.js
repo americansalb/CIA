@@ -112,10 +112,19 @@ function renderRecordings() {
 
 function createRecordingCard(recording) {
   const date = new Date(recording.uploadedAt).toLocaleString();
-  const duration = recording.duration ? formatDuration(recording.duration) : 'Unknown';
+  const duration = recording.duration ? (recording.duration === 'incomplete' ? 'Incomplete' : formatDuration(recording.duration)) : 'Unknown';
 
-  const statusClass = recording.status === 'pending_review' ? 'status-pending' : 'status-graded';
-  const statusText = recording.status === 'pending_review' ? 'Pending Review' : 'Graded';
+  let statusClass, statusText;
+  if (recording.status === 'incomplete') {
+    statusClass = 'status-incomplete';
+    statusText = '⚠️ Incomplete (Left Early)';
+  } else if (recording.status === 'pending_review') {
+    statusClass = 'status-pending';
+    statusText = 'Pending Review';
+  } else {
+    statusClass = 'status-graded';
+    statusText = 'Graded';
+  }
 
   const mainVideo = recording.videos.find(v => v.deviceType === 'main');
   const proctorVideo = recording.videos.find(v => v.deviceType === 'proctor');
