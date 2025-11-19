@@ -688,21 +688,21 @@ async function startTestQualityMonitoring() {
               faceWarning.style.display = 'none';
               monitorDiv.style.display = 'block';
             } else {
-              // CRITICAL: Show prominent warning
+              // Show warning - face too close to edge
               faceWarning.style.display = 'block';
-              faceWarningText.textContent = 'MOVE AWAY FROM EDGE - CENTER YOUR FACE';
+              faceWarningText.textContent = 'Move away from the edge';
               monitorDiv.style.display = 'none';
             }
           } else {
-            // CRITICAL: No face detected
+            // No face detected in acceptable position
             faceWarning.style.display = 'block';
-            faceWarningText.textContent = 'FACE NOT DETECTED - POSITION YOURSELF IN VIEW';
+            faceWarningText.textContent = 'Position your face in view';
             monitorDiv.style.display = 'none';
           }
         } else {
           // No faces detected
           faceWarning.style.display = 'block';
-          faceWarningText.textContent = 'FACE NOT DETECTED - POSITION YOURSELF IN VIEW';
+          faceWarningText.textContent = 'Position your face in view';
           monitorDiv.style.display = 'none';
         }
       } catch (error) {
@@ -719,7 +719,6 @@ async function startTestQualityMonitoring() {
 let proctorStatusInterval;
 function startProctorStatusMonitoring() {
   const statusBox = document.getElementById('proctorStatusBox');
-  const proctorRecIndicator = document.getElementById('proctorRecording');
 
   if (!statusBox) return;
 
@@ -737,21 +736,15 @@ function startProctorStatusMonitoring() {
       const result = await response.json();
 
       if (result.success && result.proctorDeviceConnected) {
-        // Proctor is connected
-        statusBox.style.background = '#e8f5e9';
-        statusBox.innerHTML = `
-          <div style="font-size: 14px; color: #2e7d32; font-weight: 600; margin-bottom: 5px;">✓ Second Device Active</div>
-          <div style="font-size: 12px; color: #666;">Recording from both cameras</div>
-        `;
-        proctorRecIndicator.style.display = 'block';
+        // Proctor is connected - minimal green indicator
+        statusBox.style.background = 'rgba(232, 245, 233, 0.95)';
+        statusBox.style.color = '#2e7d32';
+        statusBox.textContent = '✓ Connected';
       } else {
-        // Proctor disconnected or not connected yet
-        statusBox.style.background = '#fff3cd';
-        statusBox.innerHTML = `
-          <div style="font-size: 14px; color: #856404; font-weight: 600; margin-bottom: 5px;">⚠️ Second Device Disconnected</div>
-          <div style="font-size: 12px; color: #666;">Reconnect if possible</div>
-        `;
-        proctorRecIndicator.style.display = 'none';
+        // Proctor disconnected - minimal yellow warning
+        statusBox.style.background = 'rgba(255, 243, 205, 0.95)';
+        statusBox.style.color = '#856404';
+        statusBox.textContent = '⚠️ Disconnected';
       }
     } catch (error) {
       console.error('Error checking proctor status:', error);
@@ -869,10 +862,11 @@ function loadSegment(index) {
   // Auto-play the segment
   audioPlayer.play();
 
-  // When audio ends, show continue button
+  // When audio ends, enable continue button
   audioPlayer.onended = () => {
     const continueBtn = document.getElementById('continueBtn');
-    continueBtn.style.display = 'inline-flex';
+    continueBtn.disabled = false;
+    continueBtn.style.opacity = '1';
     continueBtn.classList.add('btn-pulse');
     setTimeout(() => continueBtn.classList.remove('btn-pulse'), 1000);
   };
@@ -880,7 +874,9 @@ function loadSegment(index) {
 
 // Continue to next segment
 function continueToNext() {
-  document.getElementById('continueBtn').style.display = 'none';
+  const continueBtn = document.getElementById('continueBtn');
+  continueBtn.disabled = true;
+  continueBtn.style.opacity = '0.4';
   loadSegment(currentSegment + 1);
 }
 

@@ -583,26 +583,12 @@ class RecordingManager {
   }
 
   showNotification(message, type = 'info', duration = 3000) {
-    // Only show notifications for non-screen recordings and only important messages
-    // Hide all technical "chunk" details from users
-    if (message.toLowerCase().includes('chunk')) {
-      // Never show chunk-related messages to users
-      console.log(`[${this.deviceType}] ${message}`);
-      return;
-    }
+    // DISABLED: All notifications hidden to keep UI clean and distraction-free during test
+    // Only log to console for debugging
+    console.log(`[${this.deviceType}] [${type}] ${message}`);
 
-    const notificationEl = document.getElementById(`${this.deviceType}Notification`);
-    if (!notificationEl) return;
-
-    notificationEl.textContent = message;
-    notificationEl.className = `recording-notification ${type}`;
-    notificationEl.style.display = 'block';
-
-    if (duration > 0) {
-      setTimeout(() => {
-        notificationEl.style.display = 'none';
-      }, duration);
-    }
+    // No UI notifications - user should focus on the test
+    return;
   }
 
   stopStream() {
