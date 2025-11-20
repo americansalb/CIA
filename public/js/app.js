@@ -182,12 +182,6 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
         const universalResponse = await fetch('/api/test-config?testName=_UNIVERSAL_INSTRUCTIONS');
         const universalResult = await universalResponse.json();
 
-        // Show test info
-        document.getElementById('testInfo').innerHTML = `
-          <p><strong>Test:</strong> ${studentData.permittedTest}</p>
-          <p><strong>Attempt:</strong> ${studentData.attempts}</p>
-        `;
-
         // If universal instructions exist, show them first
         if (universalResult.success && universalResult.config && universalResult.config.segments.length > 0) {
           setupUniversalInstructions(universalResult.config.segments[0]);
