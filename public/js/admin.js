@@ -410,6 +410,8 @@ let activeSessions = [];
 let monitoringPeers = new Map(); // sessionId -> peer object
 let currentlyMonitoring = null;
 
+console.log('[Admin] Defining switchTab function');
+
 function switchTab(tabName, event) {
   console.log('[Admin] switchTab called:', tabName);
 
@@ -669,3 +671,11 @@ function closeLiveStream() {
 
   currentlyMonitoring = null;
 }
+
+// Ensure switchTab is globally accessible
+window.switchTab = switchTab;
+
+// Verification log at end of script
+console.log('[Admin] Script fully loaded');
+console.log('[Admin] switchTab function exists?', typeof switchTab !== 'undefined');
+console.log('[Admin] window.switchTab exists?', typeof window.switchTab !== 'undefined');
