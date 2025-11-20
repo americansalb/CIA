@@ -275,16 +275,29 @@ async function saveTestSegments(testName, segments, instructionsAudioUrl = '', w
     }
 
     // Add new segments
-    segments.forEach((url, index) => {
+    if (segments.length > 0) {
+      segments.forEach((url, index) => {
+        filteredRows.push([
+          testName,
+          (index + 1).toString(),
+          url,
+          'active',
+          instructionsAudioUrl || '',
+          warmupValue,
+        ]);
+      });
+    } else if (warmupSegments.length > 0 || instructionsAudioUrl) {
+      // If there are only warmup segments or instructions with no test segments,
+      // still create a row to store them in the database
       filteredRows.push([
         testName,
-        (index + 1).toString(),
-        url,
-        'active',
+        '1',
         instructionsAudioUrl || '',
+        'active',
+        '',
         warmupValue,
       ]);
-    });
+    }
 
     // Write back to sheet
     await sheets.spreadsheets.values.update({
