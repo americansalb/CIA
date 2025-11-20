@@ -135,10 +135,14 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
         const universalResponse = await fetch('/api/test-config?testName=_UNIVERSAL_INSTRUCTIONS');
         const universalResult = await universalResponse.json();
 
-        // Store warmup URL if available
+        // Store warmup segments/URL if available
         if (universalResult.success && universalResult.config) {
-          if (universalResult.config.warmupAudioUrl) {
+          if (universalResult.config.warmupSegments && universalResult.config.warmupSegments.length > 0) {
+            testConfig.warmupSegments = universalResult.config.warmupSegments;
+            console.log('Loaded', testConfig.warmupSegments.length, 'warmup segments into testConfig');
+          } else if (universalResult.config.warmupAudioUrl) {
             testConfig.warmupAudioUrl = universalResult.config.warmupAudioUrl;
+            console.log('Loaded warmup URL into testConfig:', testConfig.warmupAudioUrl);
           }
           // Store instructions URL for later
           testConfig.universalInstructionsUrl = universalResult.config.segments?.[0] || null;
@@ -530,6 +534,37 @@ function checkIfReadyToContinue() {
   // Note: Don't clear the interval - keep monitoring continuously
 }
 
+// Request screen sharing before continuing to proctor setup
+async function requestScreenShareAndContinue() {
+  try {
+    screenStream = await navigator.mediaDevices.getDisplayMedia({
+      video: {
+        cursor: 'always',
+        displaySurface: 'monitor',
+      },
+      audio: false,
+    });
+
+    console.log('Screen sharing granted');
+
+    // Handle user stopping screen share
+    screenStream.getVideoTracks()[0].addEventListener('ended', () => {
+      console.warn('Screen sharing stopped by user');
+      alert('Screen sharing was stopped. This may affect your test submission.');
+    });
+
+    // Continue to proctor page
+    showPage('page3');
+  } catch (error) {
+    console.error('Screen sharing error:', error);
+    // Screen sharing is optional - allow user to continue
+    const continueAnyway = confirm('Screen sharing is recommended. Continue without it?');
+    if (continueAnyway) {
+      showPage('page3');
+    }
+  }
+}
+
 // Start test - triggered when clicking Continue from proctor page (page3 -> page5)
 // Override the showPage function to handle test start
 const origShowPageFunc = showPage;
@@ -554,31 +589,15 @@ showPage = async function(pageId) {
       mainRecorder = new RecordingManager('main', sessionData.sessionId);
       await mainRecorder.startRecording(mainStream);
 
-      // Request screen sharing
-      try {
-        screenStream = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            cursor: 'always',
-            displaySurface: 'monitor',
-          },
-          audio: false, // Screen audio not widely supported
-        });
-
-        // Initialize screen recorder
-        screenRecorder = new RecordingManager('screen', sessionData.sessionId);
-        await screenRecorder.startRecording(screenStream);
-
-        console.log('Screen recording started');
-
-        // Handle user stopping screen share
-        screenStream.getVideoTracks()[0].addEventListener('ended', () => {
-          console.warn('Screen sharing stopped by user');
-          alert('Screen sharing was stopped. This may affect your test submission.');
-        });
-      } catch (error) {
-        console.error('Screen sharing error:', error);
-        // Screen sharing is optional - don't block test if user declines
-        alert('Screen sharing is recommended but optional. You may continue without it.');
+      // Initialize screen recorder if screen share was granted earlier
+      if (screenStream) {
+        try {
+          screenRecorder = new RecordingManager('screen', sessionData.sessionId);
+          await screenRecorder.startRecording(screenStream);
+          console.log('Screen recording started');
+        } catch (error) {
+          console.error('Screen recording error:', error);
+        }
       }
 
       // Note: Proctor recorder will be managed by the proctor device
