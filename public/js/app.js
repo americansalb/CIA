@@ -1498,19 +1498,79 @@ function startWarmup() {
   isWarmupMode = true;
   warmupCompleted = false;
 
-  // Update UI to show it's warmup
-  const testHeader = document.querySelector('#page5 .test-header h1');
-  if (testHeader) {
-    testHeader.textContent = '🏃 Warmup Exercise (Practice)';
-    testHeader.style.color = '#4caf50';
-  }
-
-  showPage('page5');
+  // Go to pre-session page first
+  startPreSession('warmup');
 }
 
 function skipToTest() {
   isWarmupMode = false;
-  showPage('page5');
+
+  // Go to pre-session page first
+  startPreSession('test');
+}
+
+// ==================== PRE-SESSION PREPARATION ====================
+let preSessionTimer = null;
+let preSessionTimeRemaining = 60;
+let preSessionNextPage = null;
+
+function startPreSession(nextMode) {
+  preSessionNextPage = nextMode; // 'warmup' or 'test'
+  preSessionTimeRemaining = 60;
+
+  // Show pre-session page
+  showPage('pagePreSession');
+
+  // Update timer display
+  updatePreSessionTimer();
+
+  // Start countdown
+  preSessionTimer = setInterval(() => {
+    preSessionTimeRemaining--;
+    updatePreSessionTimer();
+
+    if (preSessionTimeRemaining <= 0) {
+      finishPreSession();
+    }
+  }, 1000);
+}
+
+function updatePreSessionTimer() {
+  const timerDisplay = document.getElementById('preSessionTimer');
+  const minutes = Math.floor(preSessionTimeRemaining / 60);
+  const seconds = preSessionTimeRemaining % 60;
+  timerDisplay.textContent = `${minutes}:${String(seconds).padStart(2, '0')}`;
+
+  // Change color as time runs low
+  if (preSessionTimeRemaining <= 10) {
+    timerDisplay.style.color = '#ff5722';
+  } else if (preSessionTimeRemaining <= 30) {
+    timerDisplay.style.color = '#ff9800';
+  } else {
+    timerDisplay.style.color = '#667eea';
+  }
+}
+
+function finishPreSession() {
+  // Clear timer
+  if (preSessionTimer) {
+    clearInterval(preSessionTimer);
+    preSessionTimer = null;
+  }
+
+  // Proceed to warmup or test
+  if (preSessionNextPage === 'warmup') {
+    // Update UI to show it's warmup
+    const testHeader = document.querySelector('#page5 .test-header h1');
+    if (testHeader) {
+      testHeader.textContent = '🏃 Warmup Exercise (Practice)';
+      testHeader.style.color = '#4caf50';
+    }
+    showPage('page5');
+  } else {
+    // Regular test
+    showPage('page5');
+  }
 }
 
 // Override loadSegment to handle warmup vs actual test
