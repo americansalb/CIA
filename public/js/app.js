@@ -813,6 +813,20 @@ async function startTestQualityMonitoring() {
 
 // Show proctor recording and mic indicators
 function showProctorIndicators() {
+  // Show indicators on main camera
+  const mainRecIndicator = document.getElementById('mainRecordingIndicator');
+  const mainMicIndicator = document.getElementById('mainMicIndicator');
+  const mainMicIcon = document.getElementById('mainMicIcon');
+
+  if (mainRecIndicator) {
+    mainRecIndicator.style.display = 'flex';
+  }
+
+  if (mainMicIndicator) {
+    mainMicIndicator.style.display = 'block';
+  }
+
+  // Show indicators on proctor camera
   const recIndicator = document.getElementById('proctorRecordingIndicator');
   const micIndicator = document.getElementById('proctorMicIndicator');
   const micIcon = document.getElementById('proctorMicIcon');
@@ -825,13 +839,54 @@ function showProctorIndicators() {
     micIndicator.style.display = 'block';
   }
 
-  // Animate microphone based on proctor audio
+  // Animate microphones based on audio
+  if (mainMicIcon) {
+    animateMainMic();
+  }
   if (micIcon) {
     animateProctorMic();
   }
 }
 
-// Animate microphone icon based on audio level
+// Animate main camera microphone icon based on audio level
+function animateMainMic() {
+  const mainVideo = document.getElementById('mainVideo');
+  const micIcon = document.getElementById('mainMicIcon');
+
+  if (!mainVideo || !mainVideo.srcObject || !micIcon) return;
+
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = audioContext.createAnalyser();
+    const microphone = audioContext.createMediaStreamSource(mainVideo.srcObject);
+    microphone.connect(analyser);
+    analyser.fftSize = 256;
+
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    function checkAudio() {
+      if (!mainVideo.srcObject) return; // Stop if stream ends
+
+      analyser.getByteFrequencyData(dataArray);
+      const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+
+      // Animate mic if audio detected
+      if (average > 10) {
+        micIcon.style.animation = 'micBounce 0.3s ease-in-out';
+      } else {
+        micIcon.style.animation = 'none';
+      }
+
+      requestAnimationFrame(checkAudio);
+    }
+
+    checkAudio();
+  } catch (error) {
+    console.log('Main mic animation not available:', error);
+  }
+}
+
+// Animate proctor microphone icon based on audio level
 function animateProctorMic() {
   const proctorVideo = document.getElementById('proctorVideo');
   const micIcon = document.getElementById('proctorMicIcon');
