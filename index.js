@@ -60,7 +60,7 @@ io.on('connection', (socket) => {
     socket.join(sessionId);
     socket.sessionId = sessionId;
     socket.email = email;
-    socket.role = role; // 'student' or 'admin'
+    socket.role = role; // 'student', 'proctor', or 'admin'
 
     // Track active session
     if (role === 'student') {
@@ -75,6 +75,11 @@ io.on('connection', (socket) => {
 
       // Notify all admins about active sessions
       io.emit('active-sessions', Array.from(activeSessions.values()));
+    }
+
+    // If admin joins, send them current active sessions immediately
+    if (role === 'admin') {
+      socket.emit('active-sessions', Array.from(activeSessions.values()));
     }
   });
 
@@ -108,13 +113,11 @@ io.on('connection', (socket) => {
     console.log(`Admin ${socket.id} monitoring session ${sessionId}`);
     socket.join(sessionId);
 
-    // Notify student that admin is monitoring
-    const session = activeSessions.get(sessionId);
-    if (session && session.studentSocketId) {
-      io.to(session.studentSocketId).emit('admin-monitoring', {
-        adminSocketId: socket.id,
-      });
-    }
+    // Notify all devices in this session (student + proctor) that admin is monitoring
+    // This triggers both to send their WebRTC streams
+    socket.to(sessionId).emit('admin-monitoring', {
+      adminSocketId: socket.id,
+    });
   });
 
   // Session progress updates (current segment, time, etc)
