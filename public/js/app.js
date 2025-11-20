@@ -10,7 +10,6 @@ let screenStream = null;
 let testStartTime = null;
 let currentSegment = 0;
 let interventionCount = 0;
-let repetitionCount = 5;
 let testTimer = null;
 let testConfig = null;
 let isWarmupMode = false;
@@ -642,8 +641,8 @@ showPage = async function(pageId) {
       // Initialize live monitoring with WebRTC
       initializeLiveMonitoring();
 
-      // Load first segment
-      loadSegment(0);
+      // Show pre-session overlay - test cannot start until pre-session is done
+      showPreSessionOverlay();
     }
   }
 };
@@ -1020,9 +1019,6 @@ async function finishIntervention() {
   // Show action selection
   document.getElementById('interventionStep1').style.display = 'none';
   document.getElementById('interventionStep2').style.display = 'block';
-
-  // Update repeat count display
-  document.getElementById('repeatCount').textContent = repetitionCount;
 }
 
 async function selectInterventionAction(action) {
@@ -1032,19 +1028,10 @@ async function selectInterventionAction(action) {
   interventionRecorder.setInterventionAction(action);
 
   if (action === 'repeat') {
-    if (repetitionCount > 0) {
-      repetitionCount--;
-      // Update repetitions display
-      document.getElementById('repetitionsRemaining').textContent = repetitionCount;
-      document.getElementById('repeatCount').textContent = repetitionCount;
-
-      // Replay current segment
-      const audioPlayer = document.getElementById('audioPlayer');
-      audioPlayer.currentTime = 0;
-      audioPlayer.play();
-    } else {
-      alert('No repetitions remaining');
-    }
+    // Replay current segment
+    const audioPlayer = document.getElementById('audioPlayer');
+    audioPlayer.currentTime = 0;
+    audioPlayer.play();
 
     // Close modal
     document.getElementById('interventionModal').classList.remove('active');
@@ -1086,7 +1073,8 @@ function endResearchPause() {
 }
 
 function updateInterventionDisplay() {
-  document.getElementById('interventionCount').textContent = interventionCount;
+  const remaining = 10 - interventionCount;
+  document.getElementById('interventionsRemaining').textContent = remaining;
 
   const warningEl = document.getElementById('interventionWarning');
 
@@ -1095,8 +1083,14 @@ function updateInterventionDisplay() {
     warningEl.className = 'intervention-limit-danger';
     warningEl.style.display = 'block';
     document.getElementById('interventionBtn').disabled = true;
-  } else if (interventionCount >= 5) {
-    warningEl.textContent = `⚠️ You have used ${interventionCount - 5} interventions beyond the recommended limit. Points may be deducted.`;
+  } else if (interventionCount >= 6) {
+    // After 5 penalty-free interventions, show warning
+    const penalized = interventionCount - 5;
+    warningEl.textContent = `⚠️ You have used ${penalized} penalized intervention${penalized > 1 ? 's' : ''}. Points may be deducted.`;
+    warningEl.className = 'intervention-limit-warning';
+    warningEl.style.display = 'block';
+  } else if (interventionCount === 5) {
+    warningEl.textContent = '⚠️ You have used all 5 penalty-free interventions. Further interventions will be penalized.';
     warningEl.className = 'intervention-limit-warning';
     warningEl.style.display = 'block';
   }
@@ -1602,9 +1596,8 @@ function startWarmup() {
 function skipToTest() {
   isWarmupMode = false;
 
-  // Go directly to test page
+  // Go directly to test page (pre-session will be shown automatically)
   showPage('page5');
-  loadSegment(0);
 }
 
 // Load warmup audio
@@ -1632,6 +1625,22 @@ function loadWarmup() {
   };
 
   audioPlayer.load();
+}
+
+// ==================== PRE-SESSION OVERLAY ====================
+let hasCompletedPreSession = false;
+
+// Show blocking overlay that forces pre-session before test starts
+function showPreSessionOverlay() {
+  const overlay = document.getElementById('preSessionOverlay');
+  if (overlay) {
+    overlay.style.display = 'flex';
+  }
+  hasCompletedPreSession = false;
+}
+
+function startMandatoryPreSession() {
+  openPreSessionModal();
 }
 
 // ==================== PRE-SESSION MODAL ====================
@@ -1714,10 +1723,28 @@ function showCountdown() {
       clearInterval(countdownInterval);
       countdownModal.style.display = 'none';
 
-      // Resume test or start segment playing
-      const audioPlayer = document.getElementById('audioPlayer');
-      if (audioPlayer && audioPlayer.paused) {
-        audioPlayer.play();
+      // Hide pre-session overlay if it exists
+      const overlay = document.getElementById('preSessionOverlay');
+      if (overlay) {
+        overlay.style.display = 'none';
+      }
+      hasCompletedPreSession = true;
+
+      // Remove pre-session button (no longer needed after first time)
+      const preSessionBtn = document.getElementById('preSessionBtn');
+      if (preSessionBtn && !hasCompletedPreSession) {
+        preSessionBtn.style.display = 'none';
+      }
+
+      // Start the test - load first segment
+      if (!hasCompletedPreSession || currentSegment === 0) {
+        loadSegment(0);
+      } else {
+        // Resume test - start audio if paused
+        const audioPlayer = document.getElementById('audioPlayer');
+        if (audioPlayer && audioPlayer.paused && audioPlayer.src) {
+          audioPlayer.play();
+        }
       }
 
       // Resolve the promise if waiting

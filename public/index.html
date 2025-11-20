@@ -248,14 +248,13 @@
         </button>
       </div>
 
-      <div class="intervention-stats">
-        <div class="stat-card">
-          <div class="stat-label">Interventions Used</div>
-          <div class="stat-value"><span id="interventionCount">0</span>/10</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Repetitions Remaining</div>
-          <div class="stat-value" id="repetitionsRemaining">5</div>
+      <div class="intervention-stats" style="justify-content: center;">
+        <div class="stat-card" style="min-width: 250px;">
+          <div class="stat-label">Interventions Remaining</div>
+          <div class="stat-value" id="interventionsRemaining">10</div>
+          <div style="font-size: 12px; color: #888; margin-top: 8px;">
+            (First 5 are penalty-free)
+          </div>
         </div>
       </div>
 
@@ -330,6 +329,19 @@
 
   <!-- Socket.io for live monitoring -->
   <script src="/socket.io/socket.io.js"></script>
+
+  <!-- Pre-Session Overlay (Blocks test start until completed) -->
+  <div id="preSessionOverlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.95); z-index: 9999; align-items: center; justify-content: center;">
+    <div style="text-align: center; max-width: 600px; padding: 40px;">
+      <h1 style="color: white; font-size: 42px; margin-bottom: 30px;">Before Test Begins</h1>
+      <p style="color: #ccc; font-size: 20px; margin-bottom: 50px; line-height: 1.6;">
+        You must complete your pre-session preparation before the test can start.
+      </p>
+      <button onclick="startMandatoryPreSession()" style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); color: white; border: none; padding: 25px 60px; border-radius: 12px; font-size: 24px; font-weight: bold; cursor: pointer; box-shadow: 0 8px 20px rgba(0, 137, 123, 0.4); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+        🧘 Give Pre-Session
+      </button>
+    </div>
+  </div>
 
   <!-- Pre-Session Modal -->
   <div id="preSessionModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 10000; align-items: center; justify-content: center;">

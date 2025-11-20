@@ -17,7 +17,7 @@
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #00897b 0%, #004d40 100%);
   min-height: 100vh;
   display: flex;
   justify-content: center;
@@ -84,11 +84,11 @@ input[type="number"] {
 
 input:focus {
   outline: none;
-  border-color: #667eea;
+  border-color: #00897b;
 }
 
 button {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #00897b 0%, #00695c 100%);
   color: white;
   border: none;
   padding: 14px 28px;
@@ -101,7 +101,7 @@ button {
 
 button:hover {
   transform: translateY(-2px);
-  box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 5px 15px rgba(0, 137, 123, 0.4);
 }
 
 button:disabled {
@@ -218,7 +218,7 @@ button:disabled {
 .pin-code {
   font-size: 36px;
   font-weight: bold;
-  color: #667eea;
+  color: #00897b;
   letter-spacing: 8px;
   font-family: 'Courier New', monospace;
 }
@@ -308,7 +308,7 @@ button:disabled {
 .timer-display {
   font-size: 48px;
   font-family: 'Courier New', monospace;
-  color: #667eea;
+  color: #00897b;
   text-align: center;
   margin: 20px 0;
   padding: 20px;
@@ -332,7 +332,7 @@ button:disabled {
 
 .loading-spinner {
   border: 4px solid #f3f3f3;
-  border-top: 4px solid #667eea;
+  border-top: 4px solid #00897b;
   border-radius: 50%;
   width: 40px;
   height: 40px;
@@ -365,7 +365,7 @@ button:disabled {
   font-size: 32px;
   margin: 0;
   padding: 10px 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #00897b 0%, #00695c 100%);
   color: white;
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
@@ -433,7 +433,7 @@ button:disabled {
 
 .segment-progress-bar {
   height: 100%;
-  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(90deg, #00897b 0%, #00695c 100%);
   width: 0%;
   transition: width 0.3s ease-out;
 }
@@ -505,7 +505,7 @@ button:disabled {
   justify-content: center;
   padding: 0;
   min-width: unset;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #00897b 0%, #00695c 100%);
   font-size: 18px;
 }
 
@@ -524,7 +524,7 @@ button:disabled {
 
 .audio-progress-bar {
   height: 100%;
-  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(90deg, #00897b 0%, #00695c 100%);
   width: 0%;
   transition: width 0.1s linear;
 }
@@ -606,7 +606,7 @@ button:disabled {
 .stat-value {
   font-size: 32px;
   font-weight: bold;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #00897b 0%, #00695c 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -650,7 +650,7 @@ button:disabled {
   padding: 20px;
   font-size: 16px;
   text-align: left;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #00897b 0%, #00695c 100%);
   transition: all 0.3s ease;
 }
 
@@ -723,7 +723,7 @@ button:disabled {
 
 /* Accessibility */
 *:focus-visible {
-  outline: 3px solid #667eea;
+  outline: 3px solid #00897b;
   outline-offset: 2px;
 }
 
@@ -826,7 +826,7 @@ button:focus-visible {
 }
 
 .recovery-content button {
-  background: #667eea;
+  background: #00897b;
   color: white;
   border: none;
   padding: 12px 30px;
