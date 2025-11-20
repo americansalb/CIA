@@ -1,4 +1,5 @@
 // Admin panel script
+console.log('[Admin] admin.js script loaded at', new Date().toISOString());
 let adminEmail = null;
 let allRecordings = [];
 let filteredRecordings = [];
@@ -410,12 +411,15 @@ let monitoringPeers = new Map(); // sessionId -> peer object
 let currentlyMonitoring = null;
 
 function switchTab(tabName, event) {
+  console.log('[Admin] switchTab called:', tabName);
+
   // Hide all tabs
   document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
   // Show selected tab
   if (tabName === 'live') {
+    console.log('[Admin] Switching to live monitoring tab');
     document.getElementById('liveTab').classList.add('active');
     if (event) event.target.classList.add('active');
     initializeLiveMonitoring();
@@ -429,12 +433,22 @@ function switchTab(tabName, event) {
 }
 
 function initializeLiveMonitoring() {
+  console.log('[Admin] initializeLiveMonitoring() called');
+  console.log('[Admin] Socket.io available?', typeof io !== 'undefined');
+  console.log('[Admin] adminSocket exists?', !!adminSocket);
+  console.log('[Admin] adminEmail:', adminEmail);
+
   if (adminSocket && adminSocket.connected) {
-    console.log('Already connected to live monitoring');
+    console.log('[Admin] Already connected to live monitoring');
     return;
   }
 
-  console.log('Initializing live monitoring...');
+  if (typeof io === 'undefined') {
+    console.error('[Admin] Socket.io library not loaded!');
+    return;
+  }
+
+  console.log('[Admin] Initializing live monitoring...');
 
   // Connect to Socket.io
   adminSocket = io();
