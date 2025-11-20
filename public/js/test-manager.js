@@ -236,6 +236,7 @@ function createNewTest() {
 
 // Edit universal instructions
 let universalWarmupUrl = '';
+let warmupSegments = [];
 
 async function editUniversalInstructions() {
   currentTest = '_UNIVERSAL_INSTRUCTIONS';
@@ -248,16 +249,31 @@ async function editUniversalInstructions() {
     if (result.success && result.config.segments.length > 0) {
       testSegments = result.config.segments;
       universalWarmupUrl = result.config.warmupAudioUrl || '';
+      warmupSegments = result.config.warmupSegments || [];
     } else {
       testSegments = [''];
       universalWarmupUrl = '';
+      warmupSegments = [];
     }
   } catch (error) {
     console.error('Error loading universal instructions:', error);
     testSegments = [''];
     universalWarmupUrl = '';
+    warmupSegments = [];
   }
 
+  renderUniversalInstructionsEditor();
+}
+
+// Add warmup segment
+function addWarmupSegment() {
+  warmupSegments.push('');
+  renderUniversalInstructionsEditor();
+}
+
+// Remove warmup segment
+function removeWarmupSegment(index) {
+  warmupSegments.splice(index, 1);
   renderUniversalInstructionsEditor();
 }
 
@@ -333,30 +349,38 @@ function renderUniversalInstructionsEditor() {
           <div style="background: #e8f5e9; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px;">
             🏃
           </div>
-          <div>
-            <h3 style="margin: 0; color: #2e7d32;">Warmup Exercise (Optional)</h3>
-            <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Practice audio segment - NOT graded, helps students get comfortable</p>
+          <div style="flex: 1;">
+            <h3 style="margin: 0; color: #2e7d32;">Warmup Segments (Optional)</h3>
+            <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Practice segments - same as test format, NOT graded</p>
           </div>
+          <button onclick="addWarmupSegment()" style="background: #4caf50; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+            + Add Segment
+          </button>
         </div>
 
-        <div style="background: #fafafa; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-          <label style="display: block; color: #333; font-weight: 600; margin-bottom: 8px;">
-            Upload URL (Bunny.net CDN or direct link)
-          </label>
-          <input
-            type="text"
-            id="universalWarmupInput"
-            value="${universalWarmupUrl}"
-            placeholder="https://your-cdn.b-cdn.net/warmup.mp3"
-            style="width: 100%; padding: 12px; border: 2px solid ${hasWarmup ? '#00897b' : '#e0e0e0'}; border-radius: 8px; font-size: 15px; font-family: monospace;"
-            onchange="universalWarmupUrl = this.value"
-          />
-          ${hasWarmup ? '<p style="margin: 8px 0 0 0; color: #00897b; font-size: 13px;">✓ Warmup configured</p>' : '<p style="margin: 8px 0 0 0; color: #888; font-size: 13px;">Optional - leave empty to skip warmup</p>'}
+        <div id="warmupSegmentsList" style="display: flex; flex-direction: column; gap: 12px;">
+          ${warmupSegments.length > 0 ? warmupSegments.map((url, i) => `
+            <div style="background: #fafafa; padding: 15px; border-radius: 8px; display: flex; gap: 10px; align-items: center;">
+              <div style="background: #4caf50; color: white; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; flex-shrink: 0;">
+                ${i + 1}
+              </div>
+              <input
+                type="text"
+                value="${url}"
+                placeholder="https://your-cdn.b-cdn.net/warmup-segment-${i + 1}.mp3"
+                style="flex: 1; padding: 10px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px; font-family: monospace;"
+                onchange="warmupSegments[${i}] = this.value"
+              />
+              <button onclick="removeWarmupSegment(${i})" style="background: #f44336; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px;">
+                Remove
+              </button>
+            </div>
+          `).join('') : '<p style="color: #888; text-align: center; padding: 20px;">No warmup segments yet. Click "Add Segment" to create one.</p>'}
         </div>
 
-        <div style="background: #e8f5e9; padding: 12px; border-radius: 6px; border-left: 3px solid #4caf50;">
+        <div style="background: #e8f5e9; padding: 12px; border-radius: 6px; border-left: 3px solid #4caf50; margin-top: 15px;">
           <p style="margin: 0; color: #2e7d32; font-size: 13px;">
-            <strong>ℹ️ Note:</strong> After instructions, students can choose "Start Warmup" or "Skip to Test". Same interface, not graded.
+            <strong>ℹ️ Note:</strong> Warmup works EXACTLY like the test (segments, interventions, next buttons) - just shorter and not graded.
           </p>
         </div>
       </div>
@@ -377,7 +401,6 @@ function renderUniversalInstructionsEditor() {
 // Save universal instructions
 async function saveUniversalInstructions() {
   const url = testSegments[0]?.trim();
-  const warmup = universalWarmupUrl?.trim();
 
   if (!url) {
     const confirmDelete = confirm('No instructions URL provided. This will remove universal instructions. Continue?');
@@ -389,9 +412,13 @@ async function saveUniversalInstructions() {
     return;
   }
 
-  if (warmup && !warmup.startsWith('http')) {
-    alert('Warmup URL must start with http:// or https://');
-    return;
+  // Validate warmup segments
+  const validWarmupSegments = warmupSegments.filter(s => s && s.trim());
+  for (const segment of validWarmupSegments) {
+    if (!segment.startsWith('http')) {
+      alert('All warmup segment URLs must start with http:// or https://');
+      return;
+    }
   }
 
   try {
@@ -400,9 +427,9 @@ async function saveUniversalInstructions() {
       segments: url ? [url] : [],
     };
 
-    // Add warmup if provided
-    if (warmup) {
-      config.warmupAudioUrl = warmup;
+    // Add warmup segments if provided
+    if (validWarmupSegments.length > 0) {
+      config.warmupSegments = validWarmupSegments;
     }
 
     const response = await fetch('/api/save-test', {

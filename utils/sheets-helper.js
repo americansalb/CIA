@@ -176,11 +176,28 @@ async function getTestConfig(testName) {
     // Sort by segment number
     segments.sort((a, b) => a.segmentNumber - b.segmentNumber);
 
+    // Parse warmup segments from JSON if it's an array
+    let warmupSegments = [];
+    if (warmupAudioUrl) {
+      try {
+        // Try to parse as JSON array
+        const parsed = JSON.parse(warmupAudioUrl);
+        if (Array.isArray(parsed)) {
+          warmupSegments = parsed;
+          warmupAudioUrl = ''; // Clear single URL if we have segments
+        }
+      } catch (e) {
+        // Not JSON, treat as single URL (backward compatibility)
+        warmupSegments = [];
+      }
+    }
+
     return {
       testName,
       segments: segments.map(s => s.audioUrl),
       instructionsAudioUrl: instructionsAudioUrl || '',
       warmupAudioUrl: warmupAudioUrl || '',
+      warmupSegments: warmupSegments,
     };
   } catch (error) {
     console.error('Error getting test config:', error);
@@ -188,7 +205,7 @@ async function getTestConfig(testName) {
   }
 }
 
-async function saveTestSegments(testName, segments, instructionsAudioUrl = '', warmupAudioUrl = '') {
+async function saveTestSegments(testName, segments, instructionsAudioUrl = '', warmupAudioUrl = '', warmupSegments = []) {
   try {
     const sheets = await getSheets();
     const range = process.env.TESTS_SHEET_RANGE || 'Tests!A:F';
@@ -217,6 +234,12 @@ async function saveTestSegments(testName, segments, instructionsAudioUrl = '', w
       return row[0] !== testName;
     });
 
+    // If warmup segments provided, store as JSON array
+    let warmupValue = warmupAudioUrl || '';
+    if (warmupSegments && warmupSegments.length > 0) {
+      warmupValue = JSON.stringify(warmupSegments);
+    }
+
     // Add new segments
     segments.forEach((url, index) => {
       filteredRows.push([
@@ -225,7 +248,7 @@ async function saveTestSegments(testName, segments, instructionsAudioUrl = '', w
         url,
         'active',
         instructionsAudioUrl || '',
-        warmupAudioUrl || '',
+        warmupValue,
       ]);
     });
 

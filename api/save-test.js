@@ -2,7 +2,7 @@ const { saveTestSegments } = require('../utils/sheets-helper');
 
 module.exports = async (req, res) => {
   try {
-    const { testName, segments, instructionsAudioUrl, warmupAudioUrl } = req.body;
+    const { testName, segments, instructionsAudioUrl, warmupAudioUrl, warmupSegments } = req.body;
 
     if (!testName || !segments || !Array.isArray(segments)) {
       return res.status(400).json({
@@ -21,17 +21,21 @@ module.exports = async (req, res) => {
       }
     }
 
-    // For _UNIVERSAL_INSTRUCTIONS, allow optional warmup field
+    // For _UNIVERSAL_INSTRUCTIONS, allow optional warmup segments
     if (testName === '_UNIVERSAL_INSTRUCTIONS') {
-      // Validate optional warmup URL if provided
-      if (warmupAudioUrl && !warmupAudioUrl.startsWith('http')) {
-        return res.status(400).json({
-          success: false,
-          message: 'Warmup audio URL must be a valid URL',
-        });
+      // Validate optional warmup segments if provided
+      if (warmupSegments && Array.isArray(warmupSegments)) {
+        for (const url of warmupSegments) {
+          if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+            return res.status(400).json({
+              success: false,
+              message: 'All warmup segments must be valid URLs',
+            });
+          }
+        }
       }
 
-      await saveTestSegments(testName, segments, '', warmupAudioUrl || '');
+      await saveTestSegments(testName, segments, '', '', warmupSegments || []);
     } else {
       // Regular tests don't have warmup/instructions
       await saveTestSegments(testName, segments);
