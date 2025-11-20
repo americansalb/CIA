@@ -905,12 +905,6 @@ function loadSegment(index) {
 
 // Continue to next segment or submit test
 async function continueToNext() {
-  // Check if we're in warmup mode
-  if (isWarmupMode) {
-    finishWarmupManually();
-    return;
-  }
-
   const continueBtn = document.getElementById('continueBtn');
   const buttonText = document.getElementById('continueButtonText');
 
@@ -1558,11 +1552,10 @@ function startWarmup() {
     testHeader.style.background = 'linear-gradient(135deg, #4caf50 0%, #8bc34a 100%)';
   }
 
-  // Go directly to test page
+  // Go to test page - pre-session will handle the rest
   showPage('page5');
 
-  // Load warmup audio
-  loadWarmup();
+  // DON'T load warmup here - wait for pre-session to finish
 }
 
 function skipToTest() {
@@ -1581,12 +1574,8 @@ function loadWarmup() {
   audioPlayer.src = testConfig.warmupAudioUrl;
   segmentInfo.textContent = 'Warmup Exercise - Practice Segment (Not Graded)';
 
-  // Show continue button during warmup as "Finish Warmup" option
-  continueBtn.style.display = '';
-  continueBtn.disabled = false;
-  continueBtn.style.opacity = '1';
-  const buttonText = document.getElementById('continueButtonText');
-  buttonText.textContent = 'Finish Warmup';
+  // Hide continue button during warmup
+  continueBtn.style.display = 'none';
 
   audioPlayer.onended = () => {
     warmupCompleted = true;
@@ -1604,17 +1593,6 @@ function loadWarmup() {
   audioPlayer.play().catch(err => {
     console.log('Auto-play blocked for warmup, user will need to click play:', err);
   });
-}
-
-// Finish warmup manually (if user clicks button)
-function finishWarmupManually() {
-  warmupCompleted = true;
-
-  // Show warmup completion modal with 3 options
-  const modal = document.getElementById('warmupCompletionModal');
-  if (modal) {
-    modal.style.display = 'flex';
-  }
 }
 
 // Warmup completion options
@@ -1662,7 +1640,7 @@ function startActualTest() {
   const continueBtn = document.getElementById('continueBtn');
   continueBtn.style.display = '';
 
-  // Load first actual test segment
+  // User already did pre-session before warmup, so just start the test directly
   loadSegment(0);
 }
 
@@ -1769,21 +1747,13 @@ function showCountdown() {
       }
       hasCompletedPreSession = true;
 
-      // Remove pre-session button (no longer needed after first time)
-      const preSessionBtn = document.getElementById('preSessionBtn');
-      if (preSessionBtn && !hasCompletedPreSession) {
-        preSessionBtn.style.display = 'none';
-      }
-
-      // Start the test - load first segment
-      if (!hasCompletedPreSession || currentSegment === 0) {
-        loadSegment(0);
+      // CRITICAL FIX: Check if we're in warmup mode or test mode
+      if (isWarmupMode) {
+        // Load warmup audio, not test segment!
+        loadWarmup();
       } else {
-        // Resume test - start audio if paused
-        const audioPlayer = document.getElementById('audioPlayer');
-        if (audioPlayer && audioPlayer.paused && audioPlayer.src) {
-          audioPlayer.play();
-        }
+        // Start the actual test - load first segment
+        loadSegment(0);
       }
 
       // Resolve the promise if waiting
