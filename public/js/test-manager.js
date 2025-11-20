@@ -477,16 +477,30 @@ let isPlaying = false;
 let currentAudioSource = null;
 let playbackStartTime = 0;
 let playbackOffset = 0;
+let isWarmupSplitter = false; // Track if we're splitting for warmup or test
+
+function openWarmupAudioSplitter() {
+  isWarmupSplitter = true;
+  const container = document.getElementById('warmupAudioSplitterContainer');
+  container.style.display = 'block';
+  renderAudioSplitterUI(container, 'warmup');
+}
 
 function openAudioSplitter() {
+  isWarmupSplitter = false;
   const container = document.getElementById('audioSplitterContainer');
   container.style.display = 'block';
+  renderAudioSplitterUI(container, 'test');
+}
+
+function renderAudioSplitterUI(container, type) {
+  const isWarmup = (type === 'warmup');
 
   container.innerHTML = `
     <div class="audio-splitter">
-      <h3>🎵 Fetch & Split Audio from Bunny.net</h3>
+      <h3>🎵 Fetch & Split ${isWarmup ? 'Warmup' : 'Test'} Audio from Bunny.net</h3>
       <p style="color: #666; margin-bottom: 15px;">
-        Paste the Bunny.net URL of your full audio file below. CIA will fetch it, show the waveform,
+        Paste the Bunny.net URL of your full ${isWarmup ? 'warmup' : 'test'} audio file below. CIA will fetch it, show the waveform,
         and let you visually split it into segments.
       </p>
 
@@ -824,7 +838,7 @@ async function processAndUpload() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         audioUrl: audioFile.url,
-        testName: currentTest,
+        testName: isWarmupSplitter ? '_WARMUP_' + currentTest : currentTest,
         markers: markers,
       }),
     });
@@ -832,15 +846,25 @@ async function processAndUpload() {
     const result = await response.json();
 
     if (result.success) {
-      // Update test segments with URLs
-      testSegments = result.segmentUrls;
+      if (isWarmupSplitter) {
+        // Update warmup segments with URLs
+        warmupSegments = result.segmentUrls;
+        alert(`Success! Created ${result.segmentUrls.length} warmup segments`);
 
-      alert(`Success! Created ${result.segmentUrls.length} segments`);
+        // Close splitter and refresh
+        clearAudioFile();
+        document.getElementById('warmupAudioSplitterContainer').style.display = 'none';
+        renderUniversalInstructionsEditor();
+      } else {
+        // Update test segments with URLs
+        testSegments = result.segmentUrls;
+        alert(`Success! Created ${result.segmentUrls.length} segments`);
 
-      // Close splitter and refresh
-      clearAudioFile();
-      document.getElementById('audioSplitterContainer').style.display = 'none';
-      renderSegments();
+        // Close splitter and refresh
+        clearAudioFile();
+        document.getElementById('audioSplitterContainer').style.display = 'none';
+        renderSegments();
+      }
     } else {
       throw new Error(result.message || 'Upload failed');
     }
