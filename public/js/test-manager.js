@@ -38,21 +38,26 @@ function renderTests(tests) {
   const container = document.getElementById('testsContainer');
 
   const header = `
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-      <div>
-        <h3 style="margin: 0;">Test Library</h3>
-        <p style="color: #666; margin: 5px 0 0 0; font-size: 14px;">Configure tests and universal instructions</p>
-      </div>
-      <button onclick="createNewTest()" style="background: #28a745;">+ Create New Test</button>
-    </div>
-    <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; cursor: pointer;" onclick="editUniversalInstructions()">
+    <!-- Universal Settings Section - Prominent at Top -->
+    <div style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); padding: 30px; border-radius: 12px; margin-bottom: 30px; color: white; box-shadow: 0 4px 12px rgba(0, 137, 123, 0.3);">
       <div style="display: flex; justify-content: space-between; align-items: center;">
         <div>
-          <strong style="color: #1976d2;">📹 Universal Instructions</strong>
-          <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Instructions shown to all students before every test</p>
+          <h2 style="margin: 0 0 10px 0; color: white; font-size: 24px;">⚙️ Universal Settings</h2>
+          <p style="margin: 0; opacity: 0.9; font-size: 15px;">Configure instructions and warmup that apply to ALL tests</p>
         </div>
-        <span style="color: #1976d2;">Configure →</span>
+        <button onclick="editUniversalInstructions()" style="background: white; color: #00897b; padding: 15px 30px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
+          📹 Edit Instructions & Warmup
+        </button>
       </div>
+    </div>
+
+    <!-- Tests Section -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <div>
+        <h3 style="margin: 0;">Individual Tests</h3>
+        <p style="color: #666; margin: 5px 0 0 0; font-size: 14px;">Configure test-specific audio segments</p>
+      </div>
+      <button onclick="createNewTest()" style="background: #00897b; color: white;">+ Create New Test</button>
     </div>
   `;
 
@@ -260,54 +265,110 @@ async function editUniversalInstructions() {
 function renderUniversalInstructionsEditor() {
   const container = document.getElementById('testsContainer');
 
+  const hasInstructions = testSegments[0] && testSegments[0].trim();
+  const hasWarmup = universalWarmupUrl && universalWarmupUrl.trim();
+
   container.innerHTML = `
-    <div class="test-editor">
-      <h2>📹 Universal Instructions & Warmup</h2>
-      <p style="color: #666; margin-bottom: 20px;">
-        Configure video/audio files that will play for ALL students at the start of every test.
-        These should contain general test-taking instructions and optional warmup exercises.
-      </p>
-
-      <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-        <strong style="color: #856404;">💡 Tip:</strong>
-        <p style="margin: 5px 0 0 0; color: #856404; font-size: 14px;">
-          Record a video explaining: how to position cameras, how to use interventions, test rules, etc.
-          Students will see instructions AFTER proctor setup, then can choose to do warmup before the actual test.
-        </p>
+    <div style="max-width: 900px; margin: 0 auto;">
+      <!-- Header -->
+      <div style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); padding: 30px; border-radius: 12px; margin-bottom: 30px; color: white;">
+        <h2 style="margin: 0 0 10px 0; color: white;">⚙️ Universal Settings</h2>
+        <p style="margin: 0; opacity: 0.9;">These settings apply to ALL tests. Students will see these BEFORE their individual test begins.</p>
       </div>
 
-      <div style="background: #e3f2fd; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #2196f3;">
-        <h3 style="margin-top: 0; color: #1565c0;">📢 Instructions (Video or Audio)</h3>
-        <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
-          Played after proctor connection, before warmup choice
-        </p>
-        <input
-          type="text"
-          value="${testSegments[0] || ''}"
-          placeholder="https://your-cdn.b-cdn.net/universal-instructions.mp4"
-          style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px;"
-          onchange="testSegments[0] = this.value"
-        />
+      <!-- Test Flow Diagram -->
+      <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+        <h3 style="margin: 0 0 15px 0; color: #333;">📋 Student Flow</h3>
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; color: #666;">
+          <span style="background: white; padding: 8px 12px; border-radius: 6px;">1. Login</span>
+          <span>→</span>
+          <span style="background: white; padding: 8px 12px; border-radius: 6px;">2. Camera Setup</span>
+          <span>→</span>
+          <span style="background: white; padding: 8px 12px; border-radius: 6px;">3. Proctor Connection</span>
+          <span>→</span>
+          <span style="background: #e3f2fd; padding: 8px 12px; border-radius: 6px; font-weight: 600;">4. Instructions</span>
+          <span>→</span>
+          <span style="background: #e8f5e9; padding: 8px 12px; border-radius: 6px; font-weight: 600;">5. Warmup Choice</span>
+          <span>→</span>
+          <span style="background: white; padding: 8px 12px; border-radius: 6px;">6. Test</span>
+        </div>
       </div>
 
-      <div style="background: #e8f5e9; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #4caf50;">
-        <h3 style="margin-top: 0; color: #2e7d32;">🏃 Warmup Audio (Optional)</h3>
-        <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
-          Practice segment using same interface as actual test (not graded)
-        </p>
-        <input
-          type="text"
-          id="universalWarmupInput"
-          value="${universalWarmupUrl}"
-          placeholder="https://your-cdn.b-cdn.net/warmup-exercise.mp3"
-          style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px;"
-          onchange="universalWarmupUrl = this.value"
-        />
+      <!-- Instructions Upload -->
+      <div style="background: white; padding: 30px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+          <div style="background: #e3f2fd; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+            📹
+          </div>
+          <div>
+            <h3 style="margin: 0; color: #1565c0;">Universal Instructions</h3>
+            <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Video or audio explaining test rules, camera positioning, and intervention usage</p>
+          </div>
+        </div>
+
+        <div style="background: #fafafa; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+          <label style="display: block; color: #333; font-weight: 600; margin-bottom: 8px;">
+            Upload URL (Bunny.net CDN or direct link)
+          </label>
+          <input
+            type="text"
+            value="${testSegments[0] || ''}"
+            placeholder="https://your-cdn.b-cdn.net/instructions.mp4"
+            style="width: 100%; padding: 12px; border: 2px solid ${hasInstructions ? '#00897b' : '#e0e0e0'}; border-radius: 8px; font-size: 15px; font-family: monospace;"
+            onchange="testSegments[0] = this.value"
+          />
+          ${hasInstructions ? '<p style="margin: 8px 0 0 0; color: #00897b; font-size: 13px;">✓ Instructions configured</p>' : '<p style="margin: 8px 0 0 0; color: #888; font-size: 13px;">Paste your video/audio URL above</p>'}
+        </div>
+
+        <div style="background: #fff3cd; padding: 12px; border-radius: 6px; border-left: 3px solid #ffc107;">
+          <p style="margin: 0; color: #856404; font-size: 13px;">
+            <strong>💡 Tip:</strong> Use MP4 for video or MP3 for audio. Students can skip after 5 seconds if they've seen it before.
+          </p>
+        </div>
       </div>
 
-      <div style="margin-top: 30px;">
-        <button class="back-btn" onclick="loadTests()">← Back to Tests</button>
-        <button onclick="saveUniversalInstructions()">💾 Save Instructions & Warmup</button>
+      <!-- Warmup Upload -->
+      <div style="background: white; padding: 30px; border-radius: 12px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+          <div style="background: #e8f5e9; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+            🏃
+          </div>
+          <div>
+            <h3 style="margin: 0; color: #2e7d32;">Warmup Exercise (Optional)</h3>
+            <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Practice audio segment - NOT graded, helps students get comfortable</p>
+          </div>
+        </div>
+
+        <div style="background: #fafafa; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+          <label style="display: block; color: #333; font-weight: 600; margin-bottom: 8px;">
+            Upload URL (Bunny.net CDN or direct link)
+          </label>
+          <input
+            type="text"
+            id="universalWarmupInput"
+            value="${universalWarmupUrl}"
+            placeholder="https://your-cdn.b-cdn.net/warmup.mp3"
+            style="width: 100%; padding: 12px; border: 2px solid ${hasWarmup ? '#00897b' : '#e0e0e0'}; border-radius: 8px; font-size: 15px; font-family: monospace;"
+            onchange="universalWarmupUrl = this.value"
+          />
+          ${hasWarmup ? '<p style="margin: 8px 0 0 0; color: #00897b; font-size: 13px;">✓ Warmup configured</p>' : '<p style="margin: 8px 0 0 0; color: #888; font-size: 13px;">Optional - leave empty to skip warmup</p>'}
+        </div>
+
+        <div style="background: #e8f5e9; padding: 12px; border-radius: 6px; border-left: 3px solid #4caf50;">
+          <p style="margin: 0; color: #2e7d32; font-size: 13px;">
+            <strong>ℹ️ Note:</strong> After instructions, students can choose "Start Warmup" or "Skip to Test". Same interface, not graded.
+          </p>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div style="display: flex; gap: 15px; justify-content: space-between;">
+        <button onclick="loadTests()" style="background: #757575; color: white; padding: 15px 30px; border: none; border-radius: 8px; font-size: 16px; cursor: pointer;">
+          ← Back to Test Library
+        </button>
+        <button onclick="saveUniversalInstructions()" style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); color: white; padding: 15px 40px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 12px rgba(0, 137, 123, 0.3);">
+          💾 Save Universal Settings
+        </button>
       </div>
     </div>
   `;
