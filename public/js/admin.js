@@ -409,7 +409,7 @@ let activeSessions = [];
 let monitoringPeers = new Map(); // sessionId -> peer object
 let currentlyMonitoring = null;
 
-function switchTab(tabName) {
+function switchTab(tabName, event) {
   // Hide all tabs
   document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -417,14 +417,14 @@ function switchTab(tabName) {
   // Show selected tab
   if (tabName === 'live') {
     document.getElementById('liveTab').classList.add('active');
-    event.target.classList.add('active');
+    if (event) event.target.classList.add('active');
     initializeLiveMonitoring();
   } else if (tabName === 'recordings') {
     document.getElementById('recordingsTab').classList.add('active');
-    event.target.classList.add('active');
+    if (event) event.target.classList.add('active');
   } else if (tabName === 'tests') {
     document.getElementById('testsTab').classList.add('active');
-    event.target.classList.add('active');
+    if (event) event.target.classList.add('active');
   }
 }
 
