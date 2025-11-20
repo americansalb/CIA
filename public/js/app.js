@@ -1614,7 +1614,11 @@ function createPeerForAdmin(adminSocketId, deviceType, stream) {
 
 // ==================== WARMUP MODE ====================
 function startWarmup() {
-  if (!testConfig || !testConfig.warmupAudioUrl) {
+  // Check if warmup is configured (either segments or single URL)
+  const hasWarmupSegments = testConfig?.warmupSegments?.length > 0;
+  const hasWarmupUrl = testConfig?.warmupAudioUrl;
+
+  if (!testConfig || (!hasWarmupSegments && !hasWarmupUrl)) {
     alert('Warmup audio has not been configured. Skipping to actual test.');
     skipToTest();
     return;
