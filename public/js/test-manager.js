@@ -358,20 +358,26 @@ function renderUniversalInstructionsEditor() {
 
       <!-- Warmup Segments -->
       <div style="background: white; padding: 30px; border-radius: 12px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
-          <div style="display: flex; align-items: center; gap: 15px;">
-            <div style="background: #e8f5e9; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px;">
-              🏃
-            </div>
-            <div>
-              <h3 style="margin: 0; color: #2e7d32;">Warmup Segments (Optional)</h3>
-              <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Practice segments - same as test format, NOT graded</p>
-            </div>
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+          <div style="background: #e8f5e9; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+            🏃
           </div>
-          <button onclick="addWarmupSegment()" style="background: #4caf50; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
-            + Add Segment
+          <div style="flex: 1;">
+            <h3 style="margin: 0; color: #2e7d32;">Warmup Segments (Optional)</h3>
+            <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Practice segments - same as test format, NOT graded</p>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+          <button onclick="openWarmupAudioSplitter()" style="background: #4caf50; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+            🎵 Fetch & Split from Bunny.net
+          </button>
+          <button onclick="addWarmupSegment()" style="background: #66bb6a; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+            + Add Segment URL Manually
           </button>
         </div>
+
+        <div id="warmupAudioSplitterContainer" style="display: none; margin-bottom: 20px;"></div>
 
         <div style="display: flex; flex-direction: column; gap: 12px;">
           ${warmupSegments.map((url, i) => `
