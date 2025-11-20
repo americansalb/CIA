@@ -144,7 +144,7 @@ async function getAllTests() {
 async function getTestConfig(testName) {
   try {
     const sheets = await getSheets();
-    const range = process.env.TESTS_SHEET_RANGE || 'Tests!A:D';
+    const range = process.env.TESTS_SHEET_RANGE || 'Tests!A:F';
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
@@ -153,14 +153,23 @@ async function getTestConfig(testName) {
 
     const rows = response.data.values || [];
     const segments = [];
+    let instructionsAudioUrl = '';
+    let warmupAudioUrl = '';
 
     for (let i = 1; i < rows.length; i++) {
-      const [name, segmentNum, audioUrl, status] = rows[i];
+      const [name, segmentNum, audioUrl, status, instructions, warmup] = rows[i];
       if (name === testName && status === 'active') {
         segments.push({
           segmentNumber: parseInt(segmentNum),
           audioUrl,
         });
+        // Read instructions and warmup URLs from any row (they're duplicated across all segments)
+        if (!instructionsAudioUrl && instructions) {
+          instructionsAudioUrl = instructions;
+        }
+        if (!warmupAudioUrl && warmup) {
+          warmupAudioUrl = warmup;
+        }
       }
     }
 
@@ -170,6 +179,8 @@ async function getTestConfig(testName) {
     return {
       testName,
       segments: segments.map(s => s.audioUrl),
+      instructionsAudioUrl: instructionsAudioUrl || '',
+      warmupAudioUrl: warmupAudioUrl || '',
     };
   } catch (error) {
     console.error('Error getting test config:', error);
@@ -177,10 +188,10 @@ async function getTestConfig(testName) {
   }
 }
 
-async function saveTestSegments(testName, segments) {
+async function saveTestSegments(testName, segments, instructionsAudioUrl = '', warmupAudioUrl = '') {
   try {
     const sheets = await getSheets();
-    const range = process.env.TESTS_SHEET_RANGE || 'Tests!A:D';
+    const range = process.env.TESTS_SHEET_RANGE || 'Tests!A:F';
 
     // First, get existing data to preserve other tests
     let existingRows = [];
@@ -197,7 +208,7 @@ async function saveTestSegments(testName, segments) {
 
     // Ensure headers exist (if sheet is empty or doesn't have headers)
     if (existingRows.length === 0) {
-      existingRows = [['Test_Name', 'Segment_Number', 'Audio_URL', 'Status']];
+      existingRows = [['Test_Name', 'Segment_Number', 'Audio_URL', 'Status', 'Instructions_Audio_URL', 'Warmup_Audio_URL']];
     }
 
     // Remove old entries for this test
@@ -213,6 +224,8 @@ async function saveTestSegments(testName, segments) {
         (index + 1).toString(),
         url,
         'active',
+        instructionsAudioUrl || '',
+        warmupAudioUrl || '',
       ]);
     });
 

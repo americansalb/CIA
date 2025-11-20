@@ -2,7 +2,7 @@ const { saveTestSegments } = require('../utils/sheets-helper');
 
 module.exports = async (req, res) => {
   try {
-    const { testName, segments } = req.body;
+    const { testName, segments, instructionsAudioUrl, warmupAudioUrl } = req.body;
 
     if (!testName || !segments || !Array.isArray(segments)) {
       return res.status(400).json({
@@ -21,7 +21,22 @@ module.exports = async (req, res) => {
       }
     }
 
-    await saveTestSegments(testName, segments);
+    // Validate optional URLs if provided
+    if (instructionsAudioUrl && !instructionsAudioUrl.startsWith('http')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Instructions audio URL must be a valid URL',
+      });
+    }
+
+    if (warmupAudioUrl && !warmupAudioUrl.startsWith('http')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Warmup audio URL must be a valid URL',
+      });
+    }
+
+    await saveTestSegments(testName, segments, instructionsAudioUrl, warmupAudioUrl);
 
     res.json({
       success: true,

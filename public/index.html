@@ -58,10 +58,10 @@
         </p>
       </div>
 
-      <button id="instructionsContinueBtn" onclick="showPage('page2')" disabled>Please wait...</button>
+      <button id="instructionsContinueBtn" onclick="showPage('page4')" disabled>Please wait...</button>
     </div>
 
-    <!-- Page 2: Instructions -->
+    <!-- Page 2: Instructions (NOW SHOWN AFTER PROCTOR CONNECTION) -->
     <div id="page2" class="page">
       <h1>Test Instructions</h1>
 
@@ -86,7 +86,7 @@
         <li><strong>Request Research Pause:</strong> Take up to 90 seconds to look up terminology</li>
       </ul>
 
-      <button onclick="showPage('page4')">I Understand - Continue</button>
+      <button onclick="showPage('pageTestInstructions')">I Understand - Continue to Audio Instructions</button>
     </div>
 
     <!-- Page 4: Camera/Mic Permissions (MOVED BEFORE PROCTOR) -->
@@ -153,7 +153,7 @@
         ✓ Second camera connected! Ready to proceed.
       </div>
 
-      <button id="proceedBtn" onclick="showPage('pageTestInstructions')" disabled>Continue to Instructions</button>
+      <button id="proceedBtn" onclick="showPage('page2')" disabled>Continue to Instructions</button>
     </div>
 
     <!-- Page: Test Instructions Audio/Video -->

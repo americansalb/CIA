@@ -75,6 +75,8 @@ function renderTests(tests) {
 // Edit test
 let currentTest = null;
 let testSegments = [];
+let testInstructionsAudioUrl = '';
+let testWarmupAudioUrl = '';
 
 async function editTest(testName) {
   currentTest = testName;
@@ -86,12 +88,18 @@ async function editTest(testName) {
 
     if (result.success && result.config.segments.length > 0) {
       testSegments = result.config.segments;
+      testInstructionsAudioUrl = result.config.instructionsAudioUrl || '';
+      testWarmupAudioUrl = result.config.warmupAudioUrl || '';
     } else {
       testSegments = [''];
+      testInstructionsAudioUrl = '';
+      testWarmupAudioUrl = '';
     }
   } catch (error) {
     console.error('Error loading test config:', error);
     testSegments = [''];
+    testInstructionsAudioUrl = '';
+    testWarmupAudioUrl = '';
   }
 
   renderTestEditor();
@@ -105,6 +113,35 @@ function renderTestEditor() {
     <div class="test-editor">
       <h2>${currentTest}</h2>
       <p style="color: #666; margin-bottom: 20px;">Configure audio segments for this test. You can fetch a full audio from Bunny.net and split it visually, or add segment URLs manually.</p>
+
+      <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+        <h3 style="margin-top: 0;">📢 Instructions Audio (Optional)</h3>
+        <p style="color: #666; font-size: 14px; margin-bottom: 10px;">Audio played after proctor setup, before warmup choice</p>
+        <input
+          type="text"
+          id="instructionsAudioUrl"
+          value="${testInstructionsAudioUrl}"
+          placeholder="https://your-cdn.b-cdn.net/cia/test_a1_instructions.mp3"
+          style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px;"
+          onchange="testInstructionsAudioUrl = this.value"
+        />
+      </div>
+
+      <div style="background: #e8f5e9; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+        <h3 style="margin-top: 0;">🏃 Warmup Audio (Optional)</h3>
+        <p style="color: #666; font-size: 14px; margin-bottom: 10px;">Practice segment using same interface as actual test (not graded)</p>
+        <input
+          type="text"
+          id="warmupAudioUrl"
+          value="${testWarmupAudioUrl}"
+          placeholder="https://your-cdn.b-cdn.net/cia/test_a1_warmup.mp3"
+          style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px;"
+          onchange="testWarmupAudioUrl = this.value"
+        />
+      </div>
+
+      <h3>🎯 Test Segments (Required)</h3>
+      <p style="color: #666; margin-bottom: 15px;">These are the actual graded test segments</p>
 
       <div style="display: flex; gap: 10px; margin-bottom: 20px;">
         <button class="upload-split-btn" onclick="openAudioSplitter()">🎵 Fetch & Split from Bunny.net</button>
@@ -173,14 +210,36 @@ async function saveTest() {
     }
   }
 
+  // Validate optional URLs if provided
+  if (testInstructionsAudioUrl && !testInstructionsAudioUrl.startsWith('http')) {
+    alert('Instructions audio URL must start with http:// or https://');
+    return;
+  }
+
+  if (testWarmupAudioUrl && !testWarmupAudioUrl.startsWith('http')) {
+    alert('Warmup audio URL must start with http:// or https://');
+    return;
+  }
+
   try {
+    const config = {
+      testName: currentTest,
+      segments: validSegments,
+    };
+
+    // Add optional fields if provided
+    if (testInstructionsAudioUrl.trim()) {
+      config.instructionsAudioUrl = testInstructionsAudioUrl.trim();
+    }
+
+    if (testWarmupAudioUrl.trim()) {
+      config.warmupAudioUrl = testWarmupAudioUrl.trim();
+    }
+
     const response = await fetch('/api/save-test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        testName: currentTest,
-        segments: validSegments,
-      }),
+      body: JSON.stringify(config),
     });
 
     const result = await response.json();

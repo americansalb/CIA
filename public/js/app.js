@@ -37,6 +37,13 @@ const TEST_CONFIGS = {
 
 // Page navigation
 function showPage(pageId) {
+  // Pause all audio and video elements before changing pages
+  document.querySelectorAll('audio, video').forEach(media => {
+    if (!media.paused && !media.id.includes('mainVideo') && !media.id.includes('proctorVideo')) {
+      media.pause();
+    }
+  });
+
   document.querySelectorAll('.page').forEach(page => {
     page.classList.remove('active');
   });
@@ -138,8 +145,8 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
           setupUniversalInstructions(universalResult.config.segments[0]);
           showPage('pageInstructions');
         } else {
-          // No universal instructions, go straight to text instructions
-          showPage('page2');
+          // No universal instructions, go straight to camera/mic setup
+          showPage('page4');
         }
       } else {
         throw new Error(sessionResult.message);
