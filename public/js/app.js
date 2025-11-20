@@ -1387,7 +1387,7 @@ function initializeLiveMonitoring() {
     // Join session as student
     socket.emit('join-session', {
       sessionId: sessionData.sessionId,
-      email: sessionData.email,
+      email: studentData.email,
       role: 'student',
     });
   });
