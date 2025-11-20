@@ -542,35 +542,89 @@ function checkIfReadyToContinue() {
   // Note: Don't clear the interval - keep monitoring continuously
 }
 
-// Request screen sharing before continuing to proctor setup
+// Request screen sharing before continuing to proctor setup - MUST share entire screen
 async function requestScreenShareAndContinue() {
-  try {
-    screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        cursor: 'always',
-        displaySurface: 'monitor',
-      },
-      audio: false,
-    });
+  let attempts = 0;
+  const maxAttempts = 5;
 
-    console.log('Screen sharing granted');
+  while (attempts < maxAttempts) {
+    try {
+      screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          cursor: 'always',
+          displaySurface: 'monitor', // Prefer entire screen
+        },
+        audio: false,
+        preferCurrentTab: false, // Don't allow tab sharing
+      });
 
-    // Handle user stopping screen share
-    screenStream.getVideoTracks()[0].addEventListener('ended', () => {
-      console.warn('Screen sharing stopped by user');
-      alert('Screen sharing was stopped. This may affect your test submission.');
-    });
+      // CRITICAL: Validate they actually shared entire screen, not just a window/tab
+      const videoTrack = screenStream.getVideoTracks()[0];
+      const settings = videoTrack.getSettings();
 
-    // Continue to proctor page
-    showPage('page3');
-  } catch (error) {
-    console.error('Screen sharing error:', error);
-    // Screen sharing is optional - allow user to continue
-    const continueAnyway = confirm('Screen sharing is recommended. Continue without it?');
-    if (continueAnyway) {
-      showPage('page3');
+      console.log('Screen share settings:', settings);
+      console.log('Display surface:', settings.displaySurface);
+
+      // Check if they shared entire screen
+      if (settings.displaySurface === 'monitor') {
+        console.log('✓ Entire screen shared - approved');
+
+        // Handle user stopping screen share
+        videoTrack.addEventListener('ended', () => {
+          console.warn('Screen sharing stopped by user');
+          alert('Screen sharing was stopped. This may affect your test submission.');
+        });
+
+        // Continue to proctor page
+        showPage('page3');
+        return; // Success!
+      } else {
+        // They shared a window or tab instead of entire screen - REJECT
+        console.warn('✗ User shared', settings.displaySurface, 'instead of entire screen');
+
+        // Stop the stream they just shared
+        screenStream.getTracks().forEach(track => track.stop());
+        screenStream = null;
+
+        // Force them to try again
+        const retry = confirm(
+          '⚠️ You must share your ENTIRE SCREEN, not just a window or tab.\n\n' +
+          'This is required to prevent cheating.\n\n' +
+          'Click OK to try again and select "Entire Screen" from the options.'
+        );
+
+        if (!retry) {
+          alert('Screen sharing of your entire screen is REQUIRED to take this test. You cannot proceed without it.');
+          attempts++;
+          continue;
+        }
+
+        attempts++;
+        continue; // Loop and try again
+      }
+    } catch (error) {
+      console.error('Screen sharing error:', error);
+
+      // User cancelled or error occurred
+      if (error.name === 'NotAllowedError' || error.name === 'AbortError') {
+        alert('Screen sharing is REQUIRED. You cannot take the test without sharing your entire screen.');
+        attempts++;
+
+        if (attempts >= maxAttempts) {
+          alert('You have declined screen sharing too many times. Please refresh the page and try again.');
+          return;
+        }
+        continue;
+      } else {
+        // Other error
+        alert('Failed to access screen sharing: ' + error.message);
+        return;
+      }
     }
   }
+
+  // If we get here, they failed too many times
+  alert('Screen sharing is required to take this test. Please refresh the page and try again.');
 }
 
 // Start test - triggered when clicking Continue from proctor page (page3 -> page5)
