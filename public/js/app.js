@@ -1829,6 +1829,17 @@ function startActualTest() {
   // Reset warmup mode
   isWarmupMode = false;
 
+  // CRITICAL: Reset intervention count - warmup interventions don't carry over to actual test
+  interventionCount = 0;
+  console.log('✓ Intervention count reset to 0 for actual test');
+
+  // Clear any intervention warnings from warmup
+  const warningEl = document.getElementById('interventionWarning');
+  if (warningEl) {
+    warningEl.style.display = 'none';
+    warningEl.className = '';
+  }
+
   // Reset header to normal test mode
   const testHeader = document.querySelector('#page5 .test-header h1');
   if (testHeader) {
