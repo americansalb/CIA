@@ -563,13 +563,8 @@ showPage = async function(pageId) {
       }
 
       // Note: Proctor recorder will be managed by the proctor device
-      // Show placeholder for proctor video since it's on separate device
-      const proctorVideoContainer = document.getElementById('proctorVideo').parentElement;
-      const placeholder = document.createElement('div');
-      placeholder.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #999; font-size: 14px; padding: 20px;';
-      placeholder.innerHTML = '<div style="font-size: 48px; margin-bottom: 10px;">📱</div>Recording on<br>Second Device';
-      proctorVideoContainer.style.position = 'relative';
-      proctorVideoContainer.appendChild(placeholder);
+      // Hide the video element since recording is on separate device
+      // The proctorStatusBox in HTML will show connection status
       document.getElementById('proctorVideo').style.display = 'none';
 
       // Start continuous quality monitoring during test
