@@ -250,16 +250,21 @@ async function editUniversalInstructions() {
       testSegments = result.config.segments;
       universalWarmupUrl = result.config.warmupAudioUrl || '';
       warmupSegments = result.config.warmupSegments || [];
+
+      // If no warmup segments, start with one empty field
+      if (warmupSegments.length === 0) {
+        warmupSegments = [''];
+      }
     } else {
       testSegments = [''];
       universalWarmupUrl = '';
-      warmupSegments = [];
+      warmupSegments = [''];
     }
   } catch (error) {
     console.error('Error loading universal instructions:', error);
     testSegments = [''];
     universalWarmupUrl = '';
-    warmupSegments = [];
+    warmupSegments = [''];
   }
 
   renderUniversalInstructionsEditor();
@@ -271,9 +276,17 @@ function addWarmupSegment() {
   renderUniversalInstructionsEditor();
 }
 
+// Update warmup segment
+function updateWarmupSegment(index, value) {
+  warmupSegments[index] = value;
+}
+
 // Remove warmup segment
 function removeWarmupSegment(index) {
   warmupSegments.splice(index, 1);
+  if (warmupSegments.length === 0) {
+    warmupSegments = [''];
+  }
   renderUniversalInstructionsEditor();
 }
 
@@ -343,39 +356,39 @@ function renderUniversalInstructionsEditor() {
         </div>
       </div>
 
-      <!-- Warmup Upload -->
+      <!-- Warmup Segments -->
       <div style="background: white; padding: 30px; border-radius: 12px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
-          <div style="background: #e8f5e9; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px;">
-            🏃
-          </div>
-          <div style="flex: 1;">
-            <h3 style="margin: 0; color: #2e7d32;">Warmup Segments (Optional)</h3>
-            <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Practice segments - same as test format, NOT graded</p>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+          <div style="display: flex; align-items: center; gap: 15px;">
+            <div style="background: #e8f5e9; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+              🏃
+            </div>
+            <div>
+              <h3 style="margin: 0; color: #2e7d32;">Warmup Segments (Optional)</h3>
+              <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Practice segments - same as test format, NOT graded</p>
+            </div>
           </div>
           <button onclick="addWarmupSegment()" style="background: #4caf50; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
             + Add Segment
           </button>
         </div>
 
-        <div id="warmupSegmentsList" style="display: flex; flex-direction: column; gap: 12px;">
-          ${warmupSegments.length > 0 ? warmupSegments.map((url, i) => `
-            <div style="background: #fafafa; padding: 15px; border-radius: 8px; display: flex; gap: 10px; align-items: center;">
-              <div style="background: #4caf50; color: white; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; flex-shrink: 0;">
-                ${i + 1}
-              </div>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          ${warmupSegments.map((url, i) => `
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <span style="min-width: 100px; color: #666; font-weight: 600;">Segment ${i + 1}:</span>
               <input
                 type="text"
                 value="${url}"
                 placeholder="https://your-cdn.b-cdn.net/warmup-segment-${i + 1}.mp3"
-                style="flex: 1; padding: 10px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px; font-family: monospace;"
-                onchange="warmupSegments[${i}] = this.value"
+                style="flex: 1; padding: 12px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px; font-family: monospace;"
+                onchange="updateWarmupSegment(${i}, this.value)"
               />
-              <button onclick="removeWarmupSegment(${i})" style="background: #f44336; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px;">
+              <button onclick="removeWarmupSegment(${i})" style="background: #f44336; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">
                 Remove
               </button>
             </div>
-          `).join('') : '<p style="color: #888; text-align: center; padding: 20px;">No warmup segments yet. Click "Add Segment" to create one.</p>'}
+          `).join('')}
         </div>
 
         <div style="background: #e8f5e9; padding: 12px; border-radius: 6px; border-left: 3px solid #4caf50; margin-top: 15px;">
@@ -412,8 +425,10 @@ async function saveUniversalInstructions() {
     return;
   }
 
-  // Validate warmup segments
+  // Validate warmup segments - filter out empty ones
   const validWarmupSegments = warmupSegments.filter(s => s && s.trim());
+
+  // Validate each warmup segment URL
   for (const segment of validWarmupSegments) {
     if (!segment.startsWith('http')) {
       alert('All warmup segment URLs must start with http:// or https://');
@@ -427,7 +442,7 @@ async function saveUniversalInstructions() {
       segments: url ? [url] : [],
     };
 
-    // Add warmup segments if provided
+    // Add warmup segments if any valid ones exist
     if (validWarmupSegments.length > 0) {
       config.warmupSegments = validWarmupSegments;
     }
