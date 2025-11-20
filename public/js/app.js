@@ -1418,7 +1418,7 @@ function initializeLiveMonitoring() {
       socket.emit('session-update', {
         sessionId: sessionData.sessionId,
         currentSegment: currentSegment,
-        totalSegments: totalSegments,
+        totalSegments: testConfig ? testConfig.segments.length : 0,
         elapsedTime: testStartTime ? Math.floor((Date.now() - testStartTime) / 1000) : 0,
       });
     }
