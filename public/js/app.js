@@ -1887,6 +1887,18 @@ function startActualTest() {
   interventionCount = 0;
   console.log('✓ Intervention count reset to 0 for actual test');
 
+  // Reset segment index to 0 for the actual test
+  currentSegment = 0;
+
+  // Update the display to show 10 remaining
+  updateInterventionDisplay();
+
+  // Re-enable intervention button in case it was disabled
+  const interventionBtn = document.getElementById('interventionBtn');
+  if (interventionBtn) {
+    interventionBtn.disabled = false;
+  }
+
   // Clear any intervention warnings from warmup
   const warningEl = document.getElementById('interventionWarning');
   if (warningEl) {
