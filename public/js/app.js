@@ -49,78 +49,37 @@ function showPage(pageId) {
   document.getElementById(pageId).classList.add('active');
 }
 
-// Setup universal instructions (OLD - for login page)
-function setupUniversalInstructions(videoUrl) {
-  const videoPlayer = document.getElementById('universalInstructionsVideo');
-  const continueBtn = document.getElementById('instructionsContinueBtn');
-
-  videoPlayer.src = videoUrl;
-  continueBtn.disabled = true;
-
-  // Enable continue button when video ends or after 5 seconds (whichever comes first)
-  let canContinue = false;
-
-  videoPlayer.onended = () => {
-    canContinue = true;
-    continueBtn.disabled = false;
-    continueBtn.textContent = 'I Understand - Continue';
-  };
-
-  // Allow skipping after 5 seconds
-  setTimeout(() => {
-    if (!canContinue) {
-      canContinue = true;
-      continueBtn.disabled = false;
-      continueBtn.textContent = 'Continue (or wait for video to finish)';
-    }
-  }, 5000);
-}
-
 // Load universal instructions (video or audio) for pageTestInstructions
-async function loadUniversalInstructions() {
-  try {
-    const response = await fetch('/api/test-config?testName=_UNIVERSAL_INSTRUCTIONS');
-    const result = await response.json();
+function loadUniversalInstructions() {
+  const mediaPlayer = document.getElementById('universalInstructionsMedia');
+  const continueBtn = document.getElementById('universalInstructionsContinueBtn');
 
-    const mediaPlayer = document.getElementById('universalInstructionsMedia');
-    const continueBtn = document.getElementById('universalInstructionsContinueBtn');
+  // Check if instructions URL was loaded during login
+  if (testConfig && testConfig.universalInstructionsUrl) {
+    const mediaUrl = testConfig.universalInstructionsUrl;
 
-    if (result.success && result.config && result.config.segments.length > 0) {
-      const mediaUrl = result.config.segments[0];
+    // Set the media source (works for both video and audio)
+    mediaPlayer.src = mediaUrl;
+    mediaPlayer.style.display = 'block';
+    mediaPlayer.load();
 
-      // Store warmup URL globally if available
-      if (result.config.warmupAudioUrl) {
-        testConfig.warmupAudioUrl = result.config.warmupAudioUrl;
-      }
+    continueBtn.disabled = true;
 
-      // Set the media source (works for both video and audio)
-      mediaPlayer.src = mediaUrl;
-      mediaPlayer.style.display = 'block';
-      mediaPlayer.load();
-
-      continueBtn.disabled = true;
-
-      // Enable continue button when media ends
-      mediaPlayer.onended = () => {
-        continueBtn.disabled = false;
-        continueBtn.textContent = 'Continue to Warmup Choice';
-      };
-
-      // Allow skipping after 5 seconds
-      setTimeout(() => {
-        continueBtn.disabled = false;
-        continueBtn.textContent = 'Continue (or wait for media to finish)';
-      }, 5000);
-    } else {
-      // No universal instructions, just enable button
+    // Enable continue button when media ends
+    mediaPlayer.onended = () => {
       continueBtn.disabled = false;
       continueBtn.textContent = 'Continue to Warmup Choice';
-    }
-  } catch (error) {
-    console.error('Error loading universal instructions:', error);
-    const continueBtn = document.getElementById('universalInstructionsContinueBtn');
+    };
+
+    // Allow skipping after 5 seconds
+    setTimeout(() => {
+      continueBtn.disabled = false;
+      continueBtn.textContent = 'Continue (or wait for media to finish)';
+    }, 5000);
+  } else {
+    // No universal instructions, just enable button and skip to warmup
     continueBtn.disabled = false;
-    continueBtn.textContent = 'Continue';
+    continueBtn.textContent = 'Continue to Warmup Choice';
   }
 }
 
@@ -177,18 +136,21 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
 
         testConfig = testConfigResult.config;
 
-        // Load universal instructions
+        // Load universal instructions config (but don't show yet)
         const universalResponse = await fetch('/api/test-config?testName=_UNIVERSAL_INSTRUCTIONS');
         const universalResult = await universalResponse.json();
 
-        // If universal instructions exist, show them first
-        if (universalResult.success && universalResult.config && universalResult.config.segments.length > 0) {
-          setupUniversalInstructions(universalResult.config.segments[0]);
-          showPage('pageInstructions');
-        } else {
-          // No universal instructions, go straight to camera/mic setup
-          showPage('page4');
+        // Store warmup URL if available
+        if (universalResult.success && universalResult.config) {
+          if (universalResult.config.warmupAudioUrl) {
+            testConfig.warmupAudioUrl = universalResult.config.warmupAudioUrl;
+          }
+          // Store instructions URL for later
+          testConfig.universalInstructionsUrl = universalResult.config.segments?.[0] || null;
         }
+
+        // Go straight to camera/mic setup
+        showPage('page4');
       } else {
         throw new Error(sessionResult.message);
       }
