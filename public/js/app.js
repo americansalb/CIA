@@ -367,6 +367,13 @@ async function checkVideoQuality() {
     const lightingLevel = document.getElementById('lightingLevel');
     const warningDiv = document.getElementById('qualityWarning');
 
+    // If elements don't exist (page changed), stop the interval
+    if (!lightingLevel || !warningDiv) {
+      clearInterval(qualityCheckInterval);
+      qualityCheckInterval = null;
+      return;
+    }
+
     if (avgBrightness > 70 && avgBrightness < 220) {
       lightingLevel.innerHTML = '<span style="color: #4caf50;">✓ Good</span>';
       // Clear warning if it was about lighting
@@ -869,13 +876,29 @@ function startTestTimer() {
 // Load audio segment
 function loadSegment(index) {
   if (!testConfig || index >= testConfig.segments.length) {
-    endTest('All segments completed');
+    // Handle warmup completion vs test completion differently
+    if (isWarmupMode) {
+      // Warmup completed - show completion modal
+      console.log('Warmup completed - showing completion modal');
+      const modal = document.getElementById('warmupCompletionModal');
+      if (modal) {
+        modal.style.display = 'flex';
+      }
+      warmupCompleted = true;
+    } else {
+      // Test completed - end test normally
+      endTest('All segments completed');
+    }
     return;
   }
 
   currentSegment = index;
   const audioPlayer = document.getElementById('audioPlayer');
-  audioPlayer.src = testConfig.segments[index];
+  const segmentUrl = testConfig.segments[index];
+
+  console.log(`Loading ${isWarmupMode ? 'warmup' : 'test'} segment ${index + 1}/${testConfig.segments.length}:`, segmentUrl);
+
+  audioPlayer.src = segmentUrl;
 
   // Update segment info - different text for warmup vs test
   if (isWarmupMode) {
@@ -891,7 +914,10 @@ function loadSegment(index) {
   document.getElementById('segmentProgressBar').style.width = `${progress}%`;
 
   // Auto-play the segment
-  audioPlayer.play();
+  audioPlayer.play().catch(err => {
+    console.error('Audio playback error:', err);
+    alert('Failed to play audio. Please check your connection and try again.');
+  });
 
   // When audio ends, enable continue button
   audioPlayer.onended = () => {
@@ -1567,6 +1593,7 @@ function startWarmup() {
     return;
   }
 
+  console.log('Starting warmup mode...');
   isWarmupMode = true;
   warmupCompleted = false;
 
@@ -1581,6 +1608,7 @@ function startWarmup() {
   showPage('page5');
 
   // DON'T load warmup here - wait for pre-session to finish
+  console.log('Warmup: Navigated to page5, waiting for pre-session...');
 }
 
 function skipToTest() {
@@ -1596,9 +1624,34 @@ function loadWarmup() {
   // Just loads warmup segments instead of test segments
   currentSegment = 0;
 
-  // Create warmup segments from warmupAudioUrl (or later, from warmup segments array)
-  // For now, treat single warmup URL as one segment
-  const warmupSegments = testConfig.warmupSegments || [testConfig.warmupAudioUrl];
+  // Create warmup segments from warmupSegments array or warmupAudioUrl
+  let warmupSegments = [];
+
+  if (testConfig.warmupSegments && testConfig.warmupSegments.length > 0) {
+    // Use array of warmup segments
+    warmupSegments = testConfig.warmupSegments;
+  } else if (testConfig.warmupAudioUrl) {
+    // Use single warmup URL
+    warmupSegments = [testConfig.warmupAudioUrl];
+  } else {
+    // No warmup configured, skip to test
+    console.warn('No warmup audio configured, skipping to test');
+    alert('No warmup is configured for this test. Starting the actual test.');
+    startActualTest();
+    return;
+  }
+
+  // Validate warmup segments
+  warmupSegments = warmupSegments.filter(url => url && url.trim() !== '');
+
+  if (warmupSegments.length === 0) {
+    console.warn('No valid warmup segments found, skipping to test');
+    alert('No warmup is configured for this test. Starting the actual test.');
+    startActualTest();
+    return;
+  }
+
+  console.log('Loading warmup with', warmupSegments.length, 'segments:', warmupSegments);
 
   // Temporarily swap test segments with warmup segments
   window.originalTestSegments = testConfig.segments;
