@@ -921,8 +921,15 @@ function loadSegment(index) {
 
   // When audio ends, enable continue button
   audioPlayer.onended = () => {
+    console.log(`Audio ended for ${isWarmupMode ? 'warmup' : 'test'} segment ${index + 1}/${testConfig.segments.length}`);
+
     const continueBtn = document.getElementById('continueBtn');
     const buttonText = document.getElementById('continueButtonText');
+
+    if (!continueBtn || !buttonText) {
+      console.error('Continue button or button text not found!');
+      return;
+    }
 
     // Check if this is the last segment
     if (index === testConfig.segments.length - 1) {
@@ -941,6 +948,7 @@ function loadSegment(index) {
     continueBtn.disabled = false;
     continueBtn.style.opacity = '1';
     continueBtn.classList.add('btn-pulse');
+    console.log('Continue button enabled');
     setTimeout(() => continueBtn.classList.remove('btn-pulse'), 1000);
   };
 }
