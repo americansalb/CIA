@@ -135,17 +135,25 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
         const universalResponse = await fetch('/api/test-config?testName=_UNIVERSAL_INSTRUCTIONS');
         const universalResult = await universalResponse.json();
 
+        console.log('universalResult:', universalResult);
+        console.log('universalResult.config.warmupSegments:', universalResult.config?.warmupSegments);
+        console.log('universalResult.config.warmupAudioUrl:', universalResult.config?.warmupAudioUrl);
+
         // Store warmup segments/URL if available
         if (universalResult.success && universalResult.config) {
           if (universalResult.config.warmupSegments && universalResult.config.warmupSegments.length > 0) {
             testConfig.warmupSegments = universalResult.config.warmupSegments;
-            console.log('Loaded', testConfig.warmupSegments.length, 'warmup segments into testConfig');
+            console.log('✓ Loaded', testConfig.warmupSegments.length, 'warmup segments into testConfig:', testConfig.warmupSegments);
           } else if (universalResult.config.warmupAudioUrl) {
             testConfig.warmupAudioUrl = universalResult.config.warmupAudioUrl;
-            console.log('Loaded warmup URL into testConfig:', testConfig.warmupAudioUrl);
+            console.log('✓ Loaded warmup URL into testConfig:', testConfig.warmupAudioUrl);
+          } else {
+            console.warn('✗ No warmup found in universal config!');
           }
           // Store instructions URL for later
           testConfig.universalInstructionsUrl = universalResult.config.segments?.[0] || null;
+        } else {
+          console.error('✗ universalResult failed or no config!');
         }
 
         // Go straight to camera/mic setup
@@ -1614,17 +1622,26 @@ function createPeerForAdmin(adminSocketId, deviceType, stream) {
 
 // ==================== WARMUP MODE ====================
 function startWarmup() {
+  console.log('=== startWarmup() called ===');
+  console.log('testConfig:', testConfig);
+  console.log('testConfig.warmupSegments:', testConfig?.warmupSegments);
+  console.log('testConfig.warmupAudioUrl:', testConfig?.warmupAudioUrl);
+
   // Check if warmup is configured (either segments or single URL)
   const hasWarmupSegments = testConfig?.warmupSegments?.length > 0;
   const hasWarmupUrl = testConfig?.warmupAudioUrl;
 
+  console.log('hasWarmupSegments:', hasWarmupSegments);
+  console.log('hasWarmupUrl:', hasWarmupUrl);
+
   if (!testConfig || (!hasWarmupSegments && !hasWarmupUrl)) {
+    console.error('✗ NO WARMUP FOUND - showing alert');
     alert('Warmup audio has not been configured. Skipping to actual test.');
     skipToTest();
     return;
   }
 
-  console.log('Starting warmup mode...');
+  console.log('✓ Starting warmup mode...');
   isWarmupMode = true;
   warmupCompleted = false;
 
@@ -1651,6 +1668,11 @@ function skipToTest() {
 
 // Load warmup segments (warmup works EXACTLY like a test, just not graded)
 function loadWarmup() {
+  console.log('=== loadWarmup() called ===');
+  console.log('testConfig:', testConfig);
+  console.log('testConfig.warmupSegments:', testConfig?.warmupSegments);
+  console.log('testConfig.warmupAudioUrl:', testConfig?.warmupAudioUrl);
+
   // Warmup uses the SAME segment system as tests
   // Just loads warmup segments instead of test segments
   currentSegment = 0;
@@ -1661,12 +1683,14 @@ function loadWarmup() {
   if (testConfig.warmupSegments && testConfig.warmupSegments.length > 0) {
     // Use array of warmup segments
     warmupSegments = testConfig.warmupSegments;
+    console.log('✓ Using warmupSegments array:', warmupSegments);
   } else if (testConfig.warmupAudioUrl) {
     // Use single warmup URL
     warmupSegments = [testConfig.warmupAudioUrl];
+    console.log('✓ Using warmupAudioUrl:', warmupSegments);
   } else {
     // No warmup configured, skip to test
-    console.warn('No warmup audio configured, skipping to test');
+    console.warn('✗ No warmup audio configured, skipping to test');
     alert('No warmup is configured for this test. Starting the actual test.');
     startActualTest();
     return;
