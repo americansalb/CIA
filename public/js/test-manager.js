@@ -230,22 +230,27 @@ function createNewTest() {
 }
 
 // Edit universal instructions
+let universalWarmupUrl = '';
+
 async function editUniversalInstructions() {
   currentTest = '_UNIVERSAL_INSTRUCTIONS';
-  
+
   // Load existing config if any
   try {
     const response = await fetch('/api/test-config?testName=' + encodeURIComponent('_UNIVERSAL_INSTRUCTIONS'));
     const result = await response.json();
-    
+
     if (result.success && result.config.segments.length > 0) {
       testSegments = result.config.segments;
+      universalWarmupUrl = result.config.warmupAudioUrl || '';
     } else {
       testSegments = [''];
+      universalWarmupUrl = '';
     }
   } catch (error) {
     console.error('Error loading universal instructions:', error);
     testSegments = [''];
+    universalWarmupUrl = '';
   }
 
   renderUniversalInstructionsEditor();
@@ -257,35 +262,52 @@ function renderUniversalInstructionsEditor() {
 
   container.innerHTML = `
     <div class="test-editor">
-      <h2>📹 Universal Instructions</h2>
+      <h2>📹 Universal Instructions & Warmup</h2>
       <p style="color: #666; margin-bottom: 20px;">
-        Configure a video/audio file that will play for ALL students at the start of every test. 
-        This should contain general test-taking instructions, microphone check guidance, and camera setup information.
+        Configure video/audio files that will play for ALL students at the start of every test.
+        These should contain general test-taking instructions and optional warmup exercises.
       </p>
 
       <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
         <strong style="color: #856404;">💡 Tip:</strong>
         <p style="margin: 5px 0 0 0; color: #856404; font-size: 14px;">
           Record a video explaining: how to position cameras, how to use interventions, test rules, etc.
-          Students will see this BEFORE the proctor setup screen.
+          Students will see instructions AFTER proctor setup, then can choose to do warmup before the actual test.
         </p>
       </div>
 
-      <div class="segment-list">
-        <div class="segment-item">
-          <span style="min-width: 150px; color: #666;">Instructions URL:</span>
-          <input 
-            type="text" 
-            value="${testSegments[0] || ''}" 
-            placeholder="https://your-cdn.b-cdn.net/universal-instructions.mp4"
-            onchange="testSegments[0] = this.value"
-          />
-        </div>
+      <div style="background: #e3f2fd; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #2196f3;">
+        <h3 style="margin-top: 0; color: #1565c0;">📢 Instructions (Video or Audio)</h3>
+        <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+          Played after proctor connection, before warmup choice
+        </p>
+        <input
+          type="text"
+          value="${testSegments[0] || ''}"
+          placeholder="https://your-cdn.b-cdn.net/universal-instructions.mp4"
+          style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px;"
+          onchange="testSegments[0] = this.value"
+        />
+      </div>
+
+      <div style="background: #e8f5e9; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #4caf50;">
+        <h3 style="margin-top: 0; color: #2e7d32;">🏃 Warmup Audio (Optional)</h3>
+        <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+          Practice segment using same interface as actual test (not graded)
+        </p>
+        <input
+          type="text"
+          id="universalWarmupInput"
+          value="${universalWarmupUrl}"
+          placeholder="https://your-cdn.b-cdn.net/warmup-exercise.mp3"
+          style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px;"
+          onchange="universalWarmupUrl = this.value"
+        />
       </div>
 
       <div style="margin-top: 30px;">
         <button class="back-btn" onclick="loadTests()">← Back to Tests</button>
-        <button onclick="saveUniversalInstructions()">💾 Save Instructions</button>
+        <button onclick="saveUniversalInstructions()">💾 Save Instructions & Warmup</button>
       </div>
     </div>
   `;
@@ -294,31 +316,44 @@ function renderUniversalInstructionsEditor() {
 // Save universal instructions
 async function saveUniversalInstructions() {
   const url = testSegments[0]?.trim();
+  const warmup = universalWarmupUrl?.trim();
 
   if (!url) {
-    const confirmDelete = confirm('No URL provided. This will remove universal instructions. Continue?');
+    const confirmDelete = confirm('No instructions URL provided. This will remove universal instructions. Continue?');
     if (!confirmDelete) return;
   }
 
   if (url && !url.startsWith('http')) {
-    alert('URL must start with http:// or https://');
+    alert('Instructions URL must start with http:// or https://');
+    return;
+  }
+
+  if (warmup && !warmup.startsWith('http')) {
+    alert('Warmup URL must start with http:// or https://');
     return;
   }
 
   try {
+    const config = {
+      testName: '_UNIVERSAL_INSTRUCTIONS',
+      segments: url ? [url] : [],
+    };
+
+    // Add warmup if provided
+    if (warmup) {
+      config.warmupAudioUrl = warmup;
+    }
+
     const response = await fetch('/api/save-test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        testName: '_UNIVERSAL_INSTRUCTIONS',
-        segments: url ? [url] : [],
-      }),
+      body: JSON.stringify(config),
     });
 
     const result = await response.json();
 
     if (result.success) {
-      alert('Universal instructions saved successfully!');
+      alert('Universal instructions & warmup saved successfully!');
       loadTests();
     } else {
       alert('Failed to save: ' + result.message);
