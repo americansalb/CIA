@@ -120,11 +120,21 @@
 
       <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 20px 0;">
         <p style="margin: 0; color: #1976d2;">
-          <strong>📌 Note:</strong> You can continue after the instructions finish.
+          <strong>📌 Note:</strong> You can continue at any time.
         </p>
       </div>
 
-      <button id="universalInstructionsContinueBtn" onclick="showPage('pageWarmupChoice')" disabled>Please wait...</button>
+      <div style="display: flex; flex-direction: column; gap: 15px; max-width: 500px; margin: 30px auto;">
+        <button onclick="replayInstructionsAudio()" style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer;">
+          🔄 Repeat Instructions
+        </button>
+        <button onclick="startWarmup()" style="background: linear-gradient(135deg, #4caf50 0%, #8bc34a 100%); color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer;">
+          🏃 Start Warm Up
+        </button>
+        <button onclick="skipToTest()" style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer;">
+          ⏭️ No Warm Up Needed - Begin Test
+        </button>
+      </div>
     </div>
 
     <!-- Page: Warmup Choice -->

@@ -52,7 +52,6 @@ function showPage(pageId) {
 // Load universal instructions (video or audio) for pageTestInstructions
 function loadUniversalInstructions() {
   const mediaPlayer = document.getElementById('universalInstructionsMedia');
-  const continueBtn = document.getElementById('universalInstructionsContinueBtn');
 
   // Check if instructions URL was loaded during login
   if (testConfig && testConfig.universalInstructionsUrl) {
@@ -63,23 +62,19 @@ function loadUniversalInstructions() {
     mediaPlayer.style.display = 'block';
     mediaPlayer.load();
 
-    continueBtn.disabled = true;
+    // Auto-play the instructions
+    mediaPlayer.play().catch(err => {
+      console.log('Auto-play blocked, user will need to click play:', err);
+    });
+  }
+}
 
-    // Enable continue button when media ends
-    mediaPlayer.onended = () => {
-      continueBtn.disabled = false;
-      continueBtn.textContent = 'Continue to Warmup Choice';
-    };
-
-    // Allow skipping after 5 seconds
-    setTimeout(() => {
-      continueBtn.disabled = false;
-      continueBtn.textContent = 'Continue (or wait for media to finish)';
-    }, 5000);
-  } else {
-    // No universal instructions, just enable button and skip to warmup
-    continueBtn.disabled = false;
-    continueBtn.textContent = 'Continue to Warmup Choice';
+// Replay instructions audio
+function replayInstructionsAudio() {
+  const mediaPlayer = document.getElementById('universalInstructionsMedia');
+  if (mediaPlayer && mediaPlayer.src) {
+    mediaPlayer.currentTime = 0;
+    mediaPlayer.play();
   }
 }
 
@@ -910,6 +905,12 @@ function loadSegment(index) {
 
 // Continue to next segment or submit test
 async function continueToNext() {
+  // Check if we're in warmup mode
+  if (isWarmupMode) {
+    finishWarmupManually();
+    return;
+  }
+
   const continueBtn = document.getElementById('continueBtn');
   const buttonText = document.getElementById('continueButtonText');
 
@@ -1580,8 +1581,12 @@ function loadWarmup() {
   audioPlayer.src = testConfig.warmupAudioUrl;
   segmentInfo.textContent = 'Warmup Exercise - Practice Segment (Not Graded)';
 
-  // Hide continue button during warmup - warmup is single segment
-  continueBtn.style.display = 'none';
+  // Show continue button during warmup as "Finish Warmup" option
+  continueBtn.style.display = '';
+  continueBtn.disabled = false;
+  continueBtn.style.opacity = '1';
+  const buttonText = document.getElementById('continueButtonText');
+  buttonText.textContent = 'Finish Warmup';
 
   audioPlayer.onended = () => {
     warmupCompleted = true;
@@ -1594,6 +1599,22 @@ function loadWarmup() {
   };
 
   audioPlayer.load();
+
+  // Auto-play warmup audio
+  audioPlayer.play().catch(err => {
+    console.log('Auto-play blocked for warmup, user will need to click play:', err);
+  });
+}
+
+// Finish warmup manually (if user clicks button)
+function finishWarmupManually() {
+  warmupCompleted = true;
+
+  // Show warmup completion modal with 3 options
+  const modal = document.getElementById('warmupCompletionModal');
+  if (modal) {
+    modal.style.display = 'flex';
+  }
 }
 
 // Warmup completion options
