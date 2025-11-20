@@ -36,6 +36,10 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
 
       // Load tests
       await loadTests();
+
+      // Initialize live monitoring immediately on login
+      console.log('[Admin] Auto-initializing live monitoring on login');
+      initializeLiveMonitoring();
     } else {
       errorDiv.textContent = result.message;
       errorDiv.style.display = 'block';
