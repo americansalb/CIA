@@ -25,6 +25,7 @@ app.post('/api/confirm-proctor', require('./api/confirm-proctor'));
 app.get('/api/session-status/:sessionId', require('./api/session-status'));
 app.get('/api/recordings', require('./api/get-recordings'));
 app.get('/api/session-chunks', require('./api/get-session-chunks'));
+app.get('/api/stream-chunk', require('./api/stream-chunk'));
 app.post('/api/update-grade', require('./api/update-grade'));
 app.get('/api/tests', require('./api/get-tests'));
 app.get('/api/test-config', require('./api/get-test-config'));

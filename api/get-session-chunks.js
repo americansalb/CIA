@@ -79,7 +79,7 @@ module.exports = async (req, res) => {
       return numA - numB;
     });
 
-    // Generate download URLs
+    // Generate download URLs using our proxy endpoint
     const chunksWithUrls = chunks.map(chunk => {
       const match = chunk.name.match(/_chunk_(\d+)/);
       if (!match) {
@@ -90,7 +90,7 @@ module.exports = async (req, res) => {
         fileId: chunk.id,
         fileName: chunk.name,
         chunkNumber: parseInt(match[1]),
-        downloadUrl: `https://www.googleapis.com/drive/v3/files/${chunk.id}?alt=media`,
+        downloadUrl: `/api/stream-chunk?fileId=${chunk.id}`,
         mimeType: chunk.mimeType,
       };
     }).filter(chunk => chunk !== null);
