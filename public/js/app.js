@@ -754,6 +754,64 @@ async function startTestQualityMonitoring() {
   }, 2500); // Check every 2.5 seconds during test
 }
 
+// Show proctor recording and mic indicators
+function showProctorIndicators() {
+  const recIndicator = document.getElementById('proctorRecordingIndicator');
+  const micIndicator = document.getElementById('proctorMicIndicator');
+  const micIcon = document.getElementById('proctorMicIcon');
+
+  if (recIndicator) {
+    recIndicator.style.display = 'flex';
+  }
+
+  if (micIndicator) {
+    micIndicator.style.display = 'block';
+  }
+
+  // Animate microphone based on proctor audio
+  if (micIcon) {
+    animateProctorMic();
+  }
+}
+
+// Animate microphone icon based on audio level
+function animateProctorMic() {
+  const proctorVideo = document.getElementById('proctorVideo');
+  const micIcon = document.getElementById('proctorMicIcon');
+
+  if (!proctorVideo || !proctorVideo.srcObject || !micIcon) return;
+
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = audioContext.createAnalyser();
+    const microphone = audioContext.createMediaStreamSource(proctorVideo.srcObject);
+    microphone.connect(analyser);
+    analyser.fftSize = 256;
+
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    function checkAudio() {
+      if (!proctorVideo.srcObject) return; // Stop if stream ends
+
+      analyser.getByteFrequencyData(dataArray);
+      const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+
+      // Animate mic if audio detected
+      if (average > 10) {
+        micIcon.style.animation = 'micBounce 0.3s ease-in-out';
+      } else {
+        micIcon.style.animation = 'none';
+      }
+
+      requestAnimationFrame(checkAudio);
+    }
+
+    checkAudio();
+  } catch (error) {
+    console.log('Proctor mic animation not available:', error);
+  }
+}
+
 // Monitor proctor connection status and update UI
 let proctorStatusInterval;
 function startProctorStatusMonitoring() {
@@ -780,6 +838,9 @@ function startProctorStatusMonitoring() {
       statusBox.style.background = 'rgba(232, 245, 233, 0.95)';
       statusBox.style.color = '#2e7d32';
       statusBox.textContent = '✓ Connected';
+
+      // Show recording and mic indicators
+      showProctorIndicators();
       return;
     }
 
