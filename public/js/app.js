@@ -613,14 +613,10 @@ showPage = async function(pageId) {
 let testQualityInterval;
 async function startTestQualityMonitoring() {
   const mainVideo = document.getElementById('mainVideo');
-  const monitorDiv = document.getElementById('testQualityMonitor');
-  const faceStatus = document.getElementById('testFaceStatus');
   const faceWarning = document.getElementById('faceWarning');
   const faceWarningText = document.getElementById('faceWarningText');
 
-  if (!mainVideo || !monitorDiv || !faceWarning) return;
-
-  monitorDiv.style.display = 'block';
+  if (!mainVideo || !faceWarning) return;
 
   // Initialize face detector if not already done
   await initFaceDetector();
@@ -697,32 +693,27 @@ async function startTestQualityMonitoring() {
               yMax < (videoHeight - edgeMarginY);
 
             if (isFaceVisible) {
-              faceStatus.textContent = '✓ Face OK';
+              // Face is properly positioned - hide warning
               faceWarning.style.display = 'none';
-              monitorDiv.style.display = 'block';
             } else {
               // Show warning - face too close to edge
               faceWarning.style.display = 'block';
-              faceWarningText.textContent = 'Move away from the edge';
-              monitorDiv.style.display = 'none';
+              faceWarningText.textContent = '⚠️ Move away from the edge - center your face';
             }
           } else {
             // No face detected in acceptable position
             faceWarning.style.display = 'block';
-            faceWarningText.textContent = 'Position your face in view';
-            monitorDiv.style.display = 'none';
+            faceWarningText.textContent = '⚠️ Position your face in the camera view';
           }
         } else {
           // No faces detected
           faceWarning.style.display = 'block';
-          faceWarningText.textContent = 'Position your face in view';
-          monitorDiv.style.display = 'none';
+          faceWarningText.textContent = '⚠️ Position your face in the camera view';
         }
       } catch (error) {
         console.error('Test face detection error:', error);
+        // On error, hide warning to avoid false alarms
         faceWarning.style.display = 'none';
-        monitorDiv.style.display = 'block';
-        faceStatus.textContent = '✓ Monitoring active';
       }
     }
   }, 2500); // Check every 2.5 seconds during test
@@ -917,16 +908,13 @@ async function continueToNext() {
 
 async function submitTest() {
   try {
-    // Upload final chunks for all recorders
+    // Stop all recordings and ensure all chunks are uploaded
     if (mainRecorder) {
-      await mainRecorder.uploadFinalChunk();
+      await mainRecorder.stopRecording();
     }
     if (screenRecorder) {
-      await screenRecorder.uploadFinalChunk();
+      await screenRecorder.stopRecording();
     }
-
-    // Stop all recordings
-    stopAllRecordings();
 
     // Navigate to completion page
     showPage('page6');
@@ -1566,27 +1554,74 @@ function skipToTest() {
 function loadWarmup() {
   const audioPlayer = document.getElementById('audioPlayer');
   const segmentInfo = document.getElementById('segmentInfo');
+  const continueBtn = document.getElementById('continueBtn');
 
   audioPlayer.src = testConfig.warmupAudioUrl;
-  segmentInfo.textContent = 'Warmup Exercise - Practice Segment';
+  segmentInfo.textContent = 'Warmup Exercise - Practice Segment (Not Graded)';
+
+  // Hide continue button during warmup - warmup is single segment
+  continueBtn.style.display = 'none';
 
   audioPlayer.onended = () => {
     warmupCompleted = true;
-    isWarmupMode = false;
 
-    if (confirm('Warmup completed! Ready to start the actual test?')) {
-      // Reset header
-      const testHeader = document.querySelector('#page5 .test-header h1');
-      if (testHeader) {
-        testHeader.textContent = 'Consecutive Interpreting Assessment';
-        testHeader.style.background = '';
-      }
-
-      loadSegment(0);
+    // Show warmup completion modal with 3 options
+    const modal = document.getElementById('warmupCompletionModal');
+    if (modal) {
+      modal.style.display = 'flex';
     }
   };
 
   audioPlayer.load();
+}
+
+// Warmup completion options
+function replayInstructions() {
+  // Hide warmup completion modal
+  const modal = document.getElementById('warmupCompletionModal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+
+  // Go back to instructions page
+  showPage('pageTestInstructions');
+  loadUniversalInstructions();
+}
+
+function redoWarmup() {
+  // Hide warmup completion modal
+  const modal = document.getElementById('warmupCompletionModal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+
+  // Reload warmup
+  loadWarmup();
+}
+
+function startActualTest() {
+  // Hide warmup completion modal
+  const modal = document.getElementById('warmupCompletionModal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+
+  // Reset warmup mode
+  isWarmupMode = false;
+
+  // Reset header to normal test mode
+  const testHeader = document.querySelector('#page5 .test-header h1');
+  if (testHeader) {
+    testHeader.textContent = 'Consecutive Interpreting Assessment';
+    testHeader.style.background = '';
+  }
+
+  // Show continue button again for actual test
+  const continueBtn = document.getElementById('continueBtn');
+  continueBtn.style.display = '';
+
+  // Load first actual test segment
+  loadSegment(0);
 }
 
 // ==================== PRE-SESSION OVERLAY ====================
@@ -1648,7 +1683,7 @@ function updatePreSessionTimerDisplay() {
   } else if (preSessionTimeRemaining <= 30) {
     timerDisplay.style.color = '#ff9800';
   } else {
-    timerDisplay.style.color = '#667eea';
+    timerDisplay.style.color = '#00897b';
   }
 }
 

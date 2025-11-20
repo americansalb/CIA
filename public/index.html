@@ -31,7 +31,7 @@
       </form>
 
       <p style="text-align: center; margin-top: 30px; color: #888;">
-        <a href="/admin" style="color: #667eea; text-decoration: none;">Administrator Login</a>
+        <a href="/admin" style="color: #00897b; text-decoration: none;">Administrator Login</a>
       </p>
     </div>
 
@@ -69,20 +69,20 @@
       <h1>Connect Second Camera</h1>
       <p>Set up your second device (phone/tablet) to provide an additional camera angle.</p>
 
-      <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 12px; margin: 25px 0; color: white; text-align: center;">
+      <div style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); padding: 30px; border-radius: 12px; margin: 25px 0; color: white; text-align: center;">
         <h2 style="margin: 0 0 15px 0; color: white; font-size: 24px;">Your Proctor PIN:</h2>
-        <div id="pinDisplay" style="font-size: 64px; font-weight: bold; letter-spacing: 12px; background: white; color: #667eea; padding: 25px; border-radius: 10px; margin: 15px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">------</div>
+        <div id="pinDisplay" style="font-size: 64px; font-weight: bold; letter-spacing: 12px; background: white; color: #00897b; padding: 25px; border-radius: 10px; margin: 15px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">------</div>
       </div>
 
       <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
         <h3 style="margin-top: 0; color: #333;">📱 On Your Phone/Tablet:</h3>
         <ol style="margin: 15px 0; padding-left: 25px; line-height: 1.8; color: #555;">
           <li>Open your browser</li>
-          <li>Go to: <strong id="proctorUrl" style="color: #667eea;">Loading...</strong></li>
+          <li>Go to: <strong id="proctorUrl" style="color: #00897b;">Loading...</strong></li>
           <li>Enter the PIN shown above</li>
           <li>Grant camera permissions</li>
         </ol>
-        <button id="emailProctorInfoBtn" onclick="emailProctorInfo()" style="background: #667eea; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; margin-top: 10px;">
+        <button id="emailProctorInfoBtn" onclick="emailProctorInfo()" style="background: #00897b; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; margin-top: 10px;">
           📧 Email Link to Phone
         </button>
       </div>
@@ -147,7 +147,7 @@
         <button onclick="startWarmup()" style="background: #4caf50; padding: 20px 40px; font-size: 18px;">
           🏃 Start Warmup
         </button>
-        <button onclick="skipToTest()" style="background: #667eea; padding: 20px 40px; font-size: 18px;">
+        <button onclick="skipToTest()" style="background: #00897b; padding: 20px 40px; font-size: 18px;">
           ⏭️ Skip to Actual Test
         </button>
       </div>
@@ -203,13 +203,6 @@
         </div>
       </div>
 
-      <!-- Pre-Session Button (Prominent) -->
-      <div style="text-align: center; margin-bottom: 20px;">
-        <button id="preSessionBtn" onclick="openPreSessionModal()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 15px 40px; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);">
-          🧘 Give Pre-Session
-        </button>
-      </div>
-
       <div class="test-controls">
         <button class="btn-intervention" id="interventionBtn" onclick="startIntervention()">
           <span class="btn-icon">🎤</span>
@@ -221,8 +214,8 @@
         </button>
       </div>
 
-      <div class="intervention-stats" style="justify-content: center;">
-        <div class="stat-card" style="min-width: 250px;">
+      <div class="intervention-stats" style="display: flex; justify-content: center; align-items: center; margin: 20px 0;">
+        <div class="stat-card" style="min-width: 250px; text-align: center;">
           <div class="stat-label">Interventions Remaining</div>
           <div class="stat-value" id="interventionsRemaining">10</div>
           <div style="font-size: 12px; color: #888; margin-top: 8px;">
@@ -326,7 +319,7 @@
 
       <div style="background: #f5f5f5; padding: 30px; border-radius: 12px; margin: 30px 0;">
         <div style="font-size: 16px; color: #666; margin-bottom: 10px;">Time Remaining</div>
-        <div id="preSessionTimerDisplay" style="font-size: 72px; font-weight: bold; color: #667eea;">1:00</div>
+        <div id="preSessionTimerDisplay" style="font-size: 72px; font-weight: bold; color: #00897b;">1:00</div>
         <div style="font-size: 14px; color: #888; margin-top: 10px;">Timer will end automatically</div>
       </div>
 
@@ -341,6 +334,28 @@
     <div style="text-align: center;">
       <h2 style="color: white; font-size: 36px; margin-bottom: 30px;">Begin Interpretation</h2>
       <div id="countdownNumber" style="font-size: 120px; font-weight: bold; color: #4caf50;">3</div>
+    </div>
+  </div>
+
+  <!-- Warmup Completion Modal -->
+  <div id="warmupCompletionModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 10001; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 50px; border-radius: 16px; max-width: 700px; text-align: center;">
+      <h2 style="margin-top: 0; color: #333; font-size: 32px;">Warmup Complete!</h2>
+      <p style="font-size: 18px; color: #666; margin: 25px 0 40px 0;">
+        What would you like to do next?
+      </p>
+
+      <div style="display: flex; flex-direction: column; gap: 15px;">
+        <button onclick="replayInstructions()" style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); color: white; border: none; padding: 20px 30px; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+          🔄 Play Instructions Again
+        </button>
+        <button onclick="redoWarmup()" style="background: linear-gradient(135deg, #4caf50 0%, #8bc34a 100%); color: white; border: none; padding: 20px 30px; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+          🏃 Do Warmup Again
+        </button>
+        <button onclick="startActualTest()" style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); color: white; border: none; padding: 25px 40px; border-radius: 10px; font-size: 20px; font-weight: bold; cursor: pointer; transition: transform 0.2s; box-shadow: 0 6px 20px rgba(0, 137, 123, 0.4);" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+          ✓ I'm Ready - Start the Test
+        </button>
+      </div>
     </div>
   </div>
 
