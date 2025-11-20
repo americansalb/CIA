@@ -2,6 +2,8 @@
 let proctorSessionData = null;
 let proctorStream = null;
 let proctorRecorder = null;
+let proctorSocket = null;
+let proctorStreamPeer = null;
 
 // Check URL parameters on load (for backwards compatibility)
 window.addEventListener('DOMContentLoaded', () => {
@@ -182,6 +184,9 @@ async function startProctorRecording() {
 
     console.log('Proctor recording started and confirmed');
 
+    // Initialize live monitoring for proctor stream
+    initializeProctorLiveMonitoring();
+
     // Poll for main device completion
     pollForTestCompletion();
 
@@ -269,3 +274,104 @@ window.addEventListener('beforeunload', async (e) => {
     await endProctorRecording();
   }
 });
+
+// ==================== LIVE MONITORING FOR PROCTOR ====================
+function initializeProctorLiveMonitoring() {
+  try {
+    if (!proctorSessionData || !proctorStream) {
+      console.warn('[Proctor Live Monitoring] Skipping: missing session or stream');
+      return;
+    }
+
+    if (typeof io === 'undefined') {
+      console.warn('[Proctor Live Monitoring] Socket.io not loaded - monitoring disabled');
+      return;
+    }
+
+    console.log('[Proctor Live Monitoring] Initializing for session:', proctorSessionData.sessionId);
+
+    proctorSocket = io();
+
+    proctorSocket.on('connect', () => {
+      console.log('[Proctor] Socket.io connected:', proctorSocket.id);
+
+      // Join session as proctor device
+      proctorSocket.emit('join-session', {
+        sessionId: proctorSessionData.sessionId,
+        email: proctorSessionData.studentInfo.email,
+        role: 'proctor',
+      });
+    });
+
+    // Handle admin monitoring request
+    proctorSocket.on('admin-monitoring', ({ adminSocketId }) => {
+      console.log('[Proctor] Admin is monitoring this session:', adminSocketId);
+
+      // Create WebRTC peer to stream proctor camera to admin
+      if (proctorStream) {
+        createProctorPeerForAdmin(adminSocketId, 'proctor', proctorStream);
+      }
+    });
+
+    // Handle WebRTC signaling from admin
+    proctorSocket.on('signal', ({ fromSocketId, signal, deviceType }) => {
+      console.log('[Proctor] Received signal from admin:', fromSocketId, deviceType);
+
+      // If we have a peer for this admin, forward the signal
+      if (proctorStreamPeer && proctorStreamPeer.targetSocketId === fromSocketId) {
+        proctorStreamPeer.peer.signal(signal);
+      }
+    });
+
+    proctorSocket.on('disconnect', () => {
+      console.log('[Proctor Live Monitoring] Disconnected');
+    });
+  } catch (error) {
+    console.error('[Proctor Live Monitoring] Failed to initialize (non-fatal):', error);
+  }
+}
+
+function createProctorPeerForAdmin(adminSocketId, deviceType, stream) {
+  try {
+    console.log('[Proctor Live Monitoring] Creating WebRTC peer for admin:', adminSocketId, deviceType);
+
+    if (typeof SimplePeer === 'undefined') {
+      console.warn('[Proctor Live Monitoring] SimplePeer library not loaded');
+      return;
+    }
+
+    // Create peer (proctor is initiator, sends stream to admin)
+    const peer = new SimplePeer({
+      initiator: true,
+      stream: stream,
+      trickle: false,
+    });
+
+    // When peer generates signal, send to server
+    peer.on('signal', (signal) => {
+      console.log('[Proctor] Sending signal to admin');
+      proctorSocket.emit('signal', {
+        sessionId: proctorSessionData.sessionId,
+        targetSocketId: adminSocketId,
+        signal: signal,
+        deviceType: deviceType,
+      });
+    });
+
+    peer.on('connect', () => {
+      console.log('[Proctor] WebRTC peer connected to admin');
+    });
+
+    peer.on('error', (err) => {
+      console.error('[Proctor] WebRTC peer error:', err);
+    });
+
+    // Store peer reference
+    proctorStreamPeer = {
+      peer: peer,
+      targetSocketId: adminSocketId,
+    };
+  } catch (error) {
+    console.error('[Proctor Live Monitoring] Failed to create peer:', error);
+  }
+}

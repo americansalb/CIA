@@ -601,18 +601,37 @@ function handleStudentSignal(fromSocketId, signal, deviceType, sessionId, email)
   peer.on('stream', (stream) => {
     console.log('Received stream from student:', deviceType);
 
-    // Display stream
-    const videoElement = document.getElementById('liveMainCamera');
-    videoElement.srcObject = stream;
+    // Display stream in appropriate video element
+    if (deviceType === 'main') {
+      const videoElement = document.getElementById('liveMainCamera');
+      videoElement.srcObject = stream;
+
+      // Update status indicator
+      const statusElement = document.getElementById('mainCameraStatus');
+      if (statusElement) {
+        statusElement.textContent = '✓ Connected';
+        statusElement.style.color = '#4caf50';
+      }
+    } else if (deviceType === 'proctor') {
+      const videoElement = document.getElementById('liveProctorCamera');
+      videoElement.srcObject = stream;
+
+      // Update status indicator
+      const statusElement = document.getElementById('proctorCameraStatus');
+      if (statusElement) {
+        statusElement.textContent = '✓ Connected';
+        statusElement.style.color = '#4caf50';
+      }
+    }
   });
 
   peer.on('error', (err) => {
-    console.error('WebRTC peer error:', err);
+    console.error('WebRTC peer error for', deviceType + ':', err);
   });
 
-  // Send signal back to student
+  // Send signal back to student/proctor
   peer.on('signal', (answerSignal) => {
-    console.log('Sending answer signal to student');
+    console.log('Sending answer signal to', deviceType);
     adminSocket.emit('signal', {
       sessionId: sessionId,
       targetSocketId: fromSocketId,
@@ -662,16 +681,38 @@ function closeLiveStream() {
   // Stop all peer connections
   if (currentlyMonitoring) {
     const mainPeerKey = currentlyMonitoring.sessionId + '_main';
-    const peer = monitoringPeers.get(mainPeerKey);
-    if (peer) {
-      peer.destroy();
+    const proctorPeerKey = currentlyMonitoring.sessionId + '_proctor';
+
+    const mainPeer = monitoringPeers.get(mainPeerKey);
+    if (mainPeer) {
+      mainPeer.destroy();
       monitoringPeers.delete(mainPeerKey);
+    }
+
+    const proctorPeer = monitoringPeers.get(proctorPeerKey);
+    if (proctorPeer) {
+      proctorPeer.destroy();
+      monitoringPeers.delete(proctorPeerKey);
     }
   }
 
-  // Clear video
-  const videoElement = document.getElementById('liveMainCamera');
-  videoElement.srcObject = null;
+  // Clear videos
+  const mainVideo = document.getElementById('liveMainCamera');
+  const proctorVideo = document.getElementById('liveProctorCamera');
+  mainVideo.srcObject = null;
+  proctorVideo.srcObject = null;
+
+  // Reset status indicators
+  const mainStatus = document.getElementById('mainCameraStatus');
+  const proctorStatus = document.getElementById('proctorCameraStatus');
+  if (mainStatus) {
+    mainStatus.textContent = 'Connecting...';
+    mainStatus.style.color = '#ffa500';
+  }
+  if (proctorStatus) {
+    proctorStatus.textContent = 'Connecting...';
+    proctorStatus.style.color = '#ffa500';
+  }
 
   currentlyMonitoring = null;
 }
