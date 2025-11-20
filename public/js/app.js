@@ -599,7 +599,13 @@ showPage = async function(pageId) {
       initializeLiveMonitoring();
 
       // Show pre-session overlay - test cannot start until pre-session is done
-      showPreSessionOverlay();
+      // But NOT during warmup - warmup should start immediately
+      if (!isWarmupMode) {
+        showPreSessionOverlay();
+      } else {
+        // For warmup, go directly to pre-session modal
+        startMandatoryPreSession();
+      }
     }
   }
 };
@@ -1604,6 +1610,17 @@ function loadWarmup() {
 
 // Warmup completion options
 function replayInstructions() {
+  // Confirm first since this will require setting up cameras again
+  const confirmed = confirm(
+    'Going back to replay instructions will require you to set up your camera and proctor again.\n\n' +
+    'Are you sure you want to go back?\n\n' +
+    '(Tip: If you just want more practice, click "Do Warmup Again" instead)'
+  );
+
+  if (!confirmed) {
+    return; // Stay on the modal
+  }
+
   // Hide warmup completion modal
   const modal = document.getElementById('warmupCompletionModal');
   if (modal) {
