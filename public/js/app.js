@@ -871,9 +871,14 @@ function loadSegment(index) {
   const audioPlayer = document.getElementById('audioPlayer');
   audioPlayer.src = testConfig.segments[index];
 
-  // Update segment info
-  document.getElementById('segmentInfo').textContent =
-    `Segment ${index + 1} of ${testConfig.segments.length}`;
+  // Update segment info - different text for warmup vs test
+  if (isWarmupMode) {
+    document.getElementById('segmentInfo').textContent =
+      `Warmup Segment ${index + 1} of ${testConfig.segments.length} (Not Graded)`;
+  } else {
+    document.getElementById('segmentInfo').textContent =
+      `Segment ${index + 1} of ${testConfig.segments.length}`;
+  }
 
   // Update progress bar
   const progress = ((index + 1) / testConfig.segments.length) * 100;
@@ -889,8 +894,13 @@ function loadSegment(index) {
 
     // Check if this is the last segment
     if (index === testConfig.segments.length - 1) {
-      buttonText.textContent = 'Submit Test';
-      continueBtn.style.background = '#4caf50';
+      if (isWarmupMode) {
+        buttonText.textContent = 'Finish Warmup';
+        continueBtn.style.background = '#4caf50';
+      } else {
+        buttonText.textContent = 'Submit Test';
+        continueBtn.style.background = '#4caf50';
+      }
     } else {
       buttonText.textContent = 'Continue to Next Segment';
       continueBtn.style.background = '';
@@ -911,10 +921,19 @@ async function continueToNext() {
   continueBtn.disabled = true;
   continueBtn.style.opacity = '0.4';
 
-  // Check if this was the last segment (submit test)
+  // Check if this was the last segment
   if (currentSegment === testConfig.segments.length - 1) {
-    // Upload final chunk and complete test
-    await submitTest();
+    if (isWarmupMode) {
+      // Warmup finished - show completion modal
+      warmupCompleted = true;
+      const modal = document.getElementById('warmupCompletionModal');
+      if (modal) {
+        modal.style.display = 'flex';
+      }
+    } else {
+      // Test finished - submit
+      await submitTest();
+    }
   } else {
     // Load next segment
     currentSegment++;
@@ -1565,34 +1584,22 @@ function skipToTest() {
   showPage('page5');
 }
 
-// Load warmup audio
+// Load warmup segments (warmup works EXACTLY like a test, just not graded)
 function loadWarmup() {
-  const audioPlayer = document.getElementById('audioPlayer');
-  const segmentInfo = document.getElementById('segmentInfo');
-  const continueBtn = document.getElementById('continueBtn');
+  // Warmup uses the SAME segment system as tests
+  // Just loads warmup segments instead of test segments
+  currentSegment = 0;
 
-  audioPlayer.src = testConfig.warmupAudioUrl;
-  segmentInfo.textContent = 'Warmup Exercise - Practice Segment (Not Graded)';
+  // Create warmup segments from warmupAudioUrl (or later, from warmup segments array)
+  // For now, treat single warmup URL as one segment
+  const warmupSegments = testConfig.warmupSegments || [testConfig.warmupAudioUrl];
 
-  // Hide continue button during warmup
-  continueBtn.style.display = 'none';
+  // Temporarily swap test segments with warmup segments
+  window.originalTestSegments = testConfig.segments;
+  testConfig.segments = warmupSegments;
 
-  audioPlayer.onended = () => {
-    warmupCompleted = true;
-
-    // Show warmup completion modal with 3 options
-    const modal = document.getElementById('warmupCompletionModal');
-    if (modal) {
-      modal.style.display = 'flex';
-    }
-  };
-
-  audioPlayer.load();
-
-  // Auto-play warmup audio
-  audioPlayer.play().catch(err => {
-    console.log('Auto-play blocked for warmup, user will need to click play:', err);
-  });
+  // Load first warmup segment using normal segment loading
+  loadSegment(0);
 }
 
 // Warmup completion options
@@ -1615,7 +1622,9 @@ function redoWarmup() {
     modal.style.display = 'none';
   }
 
-  // Reload warmup
+  // Reset warmup and reload
+  isWarmupMode = true;
+  warmupCompleted = false;
   loadWarmup();
 }
 
@@ -1624,6 +1633,11 @@ function startActualTest() {
   const modal = document.getElementById('warmupCompletionModal');
   if (modal) {
     modal.style.display = 'none';
+  }
+
+  // Restore original test segments
+  if (window.originalTestSegments) {
+    testConfig.segments = window.originalTestSegments;
   }
 
   // Reset warmup mode
