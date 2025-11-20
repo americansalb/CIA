@@ -673,6 +673,9 @@ showPage = async function(pageId) {
       // Start proctor status monitoring
       startProctorStatusMonitoring();
 
+      // Show recording indicators immediately (recording starts when page loads)
+      showProctorIndicators();
+
       // Start audio visualization
       startAudioVisualization();
 
