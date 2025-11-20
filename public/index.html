@@ -61,33 +61,6 @@
       <button id="instructionsContinueBtn" onclick="showPage('page4')" disabled>Please wait...</button>
     </div>
 
-    <!-- Page 2: Instructions (NOW SHOWN AFTER PROCTOR CONNECTION) -->
-    <div id="page2" class="page">
-      <h1>Test Instructions</h1>
-
-      <div id="testInfo" class="success-message"></div>
-
-      <h2>Important Guidelines:</h2>
-      <ul style="margin-left: 20px; margin-bottom: 20px; color: #555; line-height: 1.8;">
-        <li>You will need TWO devices for this test (e.g., computer + phone)</li>
-        <li>Your main device will display the test and record your interpretation</li>
-        <li>Your second device (proctoring device) will provide an additional camera angle</li>
-        <li>Both cameras must be active throughout the entire test</li>
-        <li>You will interpret from English into your target language</li>
-        <li>Maximum test duration: 35 minutes</li>
-        <li>You may request up to 5 interventions without penalty</li>
-        <li>Maximum 10 interventions allowed per test</li>
-        <li>All recordings are automatically uploaded to prevent data loss</li>
-      </ul>
-
-      <h2>Intervention Types:</h2>
-      <ul style="margin-left: 20px; margin-bottom: 20px; color: #555; line-height: 1.8;">
-        <li><strong>Request Repetition:</strong> Ask the speaker to repeat the last segment</li>
-        <li><strong>Request Research Pause:</strong> Take up to 90 seconds to look up terminology</li>
-      </ul>
-
-      <button onclick="showPage('pageTestInstructions')">I Understand - Continue to Audio Instructions</button>
-    </div>
 
     <!-- Page 4: Camera/Mic Permissions (MOVED BEFORE PROCTOR) -->
     <div id="page4" class="page">
@@ -153,32 +126,32 @@
         ✓ Second camera connected! Ready to proceed.
       </div>
 
-      <button id="proceedBtn" onclick="showPage('page2')" disabled>Continue to Instructions</button>
+      <button id="proceedBtn" onclick="showPage('pageTestInstructions')" disabled>Continue to Instructions</button>
     </div>
 
-    <!-- Page: Test Instructions Audio/Video -->
+    <!-- Page: Universal Instructions (Video or Audio) -->
     <div id="pageTestInstructions" class="page">
       <h1>Test Instructions</h1>
-      <p>Please listen carefully to the following instructions about the test format and procedures.</p>
+      <p>Please watch or listen carefully to the following instructions.</p>
 
       <div style="max-width: 800px; margin: 30px auto;">
-        <audio
-          id="testInstructionsAudio"
+        <!-- Video player (shown if video URL provided) -->
+        <video
+          id="universalInstructionsMedia"
           controls
-          style="width: 100%; border-radius: 8px;"
+          style="width: 100%; border-radius: 8px; background: #000; display: none;"
         >
-          <source id="testInstructionsSource" src="" type="audio/mpeg">
-          Your browser does not support audio playback.
-        </audio>
+          Your browser does not support video/audio playback.
+        </video>
       </div>
 
-      <div style="background: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
+      <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 20px 0;">
         <p style="margin: 0; color: #1976d2;">
-          <strong>📌 Note:</strong> You can continue after the instructions finish, or skip if you've heard them before.
+          <strong>📌 Note:</strong> You can continue after the instructions finish.
         </p>
       </div>
 
-      <button id="instructionsAudioContinueBtn" onclick="showPage('pageWarmupChoice')">Continue to Warmup</button>
+      <button id="universalInstructionsContinueBtn" onclick="showPage('pageWarmupChoice')" disabled>Please wait...</button>
     </div>
 
     <!-- Page: Warmup Choice -->
@@ -207,33 +180,7 @@
       </div>
     </div>
 
-    <!-- Page: Pre-Session Preparation -->
-    <div id="pagePreSession" class="page">
-      <h1>Pre-Session Preparation</h1>
-      <p style="font-size: 18px; color: #333; max-width: 600px; margin: 20px auto;">
-        Please perform both <strong>pre-session for patient and provider</strong> now.
-      </p>
-
-      <div style="background: #f5f5f5; padding: 30px; border-radius: 12px; margin: 30px auto; max-width: 500px;">
-        <div style="text-align: center;">
-          <div style="font-size: 18px; color: #666; margin-bottom: 15px;">Time Remaining</div>
-          <div id="preSessionTimer" style="font-size: 72px; font-weight: bold; color: #667eea; margin-bottom: 20px;">1:00</div>
-          <div style="font-size: 14px; color: #888;">The session will automatically begin when the timer reaches zero</div>
-        </div>
-      </div>
-
-      <div style="background: #e3f2fd; padding: 20px; border-radius: 8px; margin: 30px auto; max-width: 600px;">
-        <p style="margin: 0; color: #1976d2; font-size: 14px;">
-          <strong>💡 Tip:</strong> Use this time to review your notes, adjust your seating position, and prepare mentally for the assessment.
-        </p>
-      </div>
-
-      <button id="preSessionReadyBtn" onclick="finishPreSession()" style="background: #4caf50; padding: 20px 40px; font-size: 18px;">
-        ✓ I'm Ready to Begin
-      </button>
-    </div>
-
-    <!-- Page 5: Test Interface -->
+<!-- Page 5: Test Interface -->
     <div id="page5" class="page">
       <div class="test-header">
         <h1>Consecutive Interpreting Assessment</h1>
@@ -283,6 +230,13 @@
         </div>
       </div>
 
+      <!-- Pre-Session Button (Prominent) -->
+      <div style="text-align: center; margin-bottom: 20px;">
+        <button id="preSessionBtn" onclick="openPreSessionModal()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 15px 40px; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);">
+          🧘 Give Pre-Session
+        </button>
+      </div>
+
       <div class="test-controls">
         <button class="btn-intervention" id="interventionBtn" onclick="startIntervention()">
           <span class="btn-icon">🎤</span>
@@ -290,7 +244,7 @@
         </button>
         <button class="btn-continue" id="continueBtn" onclick="continueToNext()" disabled style="opacity: 0.4;">
           <span class="btn-icon">→</span>
-          <span>Continue to Next Segment</span>
+          <span id="continueButtonText">Continue to Next Segment</span>
         </button>
       </div>
 
@@ -376,6 +330,34 @@
 
   <!-- Socket.io for live monitoring -->
   <script src="/socket.io/socket.io.js"></script>
+
+  <!-- Pre-Session Modal -->
+  <div id="preSessionModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 10000; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 40px; border-radius: 16px; max-width: 600px; text-align: center;">
+      <h2 style="margin-top: 0; color: #333;">Pre-Session Preparation</h2>
+      <p style="font-size: 18px; color: #666; margin: 20px 0;">
+        Please perform both <strong>pre-session for patient and provider</strong> now.
+      </p>
+
+      <div style="background: #f5f5f5; padding: 30px; border-radius: 12px; margin: 30px 0;">
+        <div style="font-size: 16px; color: #666; margin-bottom: 10px;">Time Remaining</div>
+        <div id="preSessionTimerDisplay" style="font-size: 72px; font-weight: bold; color: #667eea;">1:00</div>
+        <div style="font-size: 14px; color: #888; margin-top: 10px;">Timer will end automatically</div>
+      </div>
+
+      <button onclick="finishPreSession()" style="background: #4caf50; color: white; border: none; padding: 15px 40px; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer;">
+        ✓ I'm Ready to Begin
+      </button>
+    </div>
+  </div>
+
+  <!-- Countdown Modal -->
+  <div id="countdownModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 10001; align-items: center; justify-content: center;">
+    <div style="text-align: center;">
+      <h2 style="color: white; font-size: 36px; margin-bottom: 30px;">Begin Interpretation</h2>
+      <div id="countdownNumber" style="font-size: 120px; font-weight: bold; color: #4caf50;">3</div>
+    </div>
+  </div>
 
   <!-- Simple-peer for WebRTC -->
   <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>

@@ -50,7 +50,7 @@ function showPage(pageId) {
   document.getElementById(pageId).classList.add('active');
 }
 
-// Setup universal instructions
+// Setup universal instructions (OLD - for login page)
 function setupUniversalInstructions(videoUrl) {
   const videoPlayer = document.getElementById('universalInstructionsVideo');
   const continueBtn = document.getElementById('instructionsContinueBtn');
@@ -75,6 +75,54 @@ function setupUniversalInstructions(videoUrl) {
       continueBtn.textContent = 'Continue (or wait for video to finish)';
     }
   }, 5000);
+}
+
+// Load universal instructions (video or audio) for pageTestInstructions
+async function loadUniversalInstructions() {
+  try {
+    const response = await fetch('/api/test-config?testName=_UNIVERSAL_INSTRUCTIONS');
+    const result = await response.json();
+
+    const mediaPlayer = document.getElementById('universalInstructionsMedia');
+    const continueBtn = document.getElementById('universalInstructionsContinueBtn');
+
+    if (result.success && result.config && result.config.segments.length > 0) {
+      const mediaUrl = result.config.segments[0];
+
+      // Store warmup URL globally if available
+      if (result.config.warmupAudioUrl) {
+        testConfig.warmupAudioUrl = result.config.warmupAudioUrl;
+      }
+
+      // Set the media source (works for both video and audio)
+      mediaPlayer.src = mediaUrl;
+      mediaPlayer.style.display = 'block';
+      mediaPlayer.load();
+
+      continueBtn.disabled = true;
+
+      // Enable continue button when media ends
+      mediaPlayer.onended = () => {
+        continueBtn.disabled = false;
+        continueBtn.textContent = 'Continue to Warmup Choice';
+      };
+
+      // Allow skipping after 5 seconds
+      setTimeout(() => {
+        continueBtn.disabled = false;
+        continueBtn.textContent = 'Continue (or wait for media to finish)';
+      }, 5000);
+    } else {
+      // No universal instructions, just enable button
+      continueBtn.disabled = false;
+      continueBtn.textContent = 'Continue to Warmup Choice';
+    }
+  } catch (error) {
+    console.error('Error loading universal instructions:', error);
+    const continueBtn = document.getElementById('universalInstructionsContinueBtn');
+    continueBtn.disabled = false;
+    continueBtn.textContent = 'Continue';
+  }
 }
 
 // Login form handler
@@ -536,13 +584,8 @@ showPage = async function(pageId) {
   }
 
   if (pageId === 'pageTestInstructions') {
-    // Load instructions audio from test config
-    if (testConfig && testConfig.instructionsAudioUrl) {
-      const audioSource = document.getElementById('testInstructionsSource');
-      const audioPlayer = document.getElementById('testInstructionsAudio');
-      audioSource.src = testConfig.instructionsAudioUrl;
-      audioPlayer.load();
-    }
+    // Load universal instructions (video or audio) from _UNIVERSAL_INSTRUCTIONS
+    loadUniversalInstructions();
   }
 
   if (pageId === 'page5') {
@@ -880,6 +923,17 @@ function loadSegment(index) {
   // When audio ends, enable continue button
   audioPlayer.onended = () => {
     const continueBtn = document.getElementById('continueBtn');
+    const buttonText = document.getElementById('continueButtonText');
+
+    // Check if this is the last segment
+    if (index === testConfig.segments.length - 1) {
+      buttonText.textContent = 'Submit Test';
+      continueBtn.style.background = '#4caf50';
+    } else {
+      buttonText.textContent = 'Continue to Next Segment';
+      continueBtn.style.background = '';
+    }
+
     continueBtn.disabled = false;
     continueBtn.style.opacity = '1';
     continueBtn.classList.add('btn-pulse');
@@ -887,12 +941,44 @@ function loadSegment(index) {
   };
 }
 
-// Continue to next segment
-function continueToNext() {
+// Continue to next segment or submit test
+async function continueToNext() {
   const continueBtn = document.getElementById('continueBtn');
+  const buttonText = document.getElementById('continueButtonText');
+
   continueBtn.disabled = true;
   continueBtn.style.opacity = '0.4';
-  loadSegment(currentSegment + 1);
+
+  // Check if this was the last segment (submit test)
+  if (currentSegment === testConfig.segments.length - 1) {
+    // Upload final chunk and complete test
+    await submitTest();
+  } else {
+    // Load next segment
+    currentSegment++;
+    loadSegment(currentSegment);
+  }
+}
+
+async function submitTest() {
+  try {
+    // Upload final chunks for all recorders
+    if (mainRecorder) {
+      await mainRecorder.uploadFinalChunk();
+    }
+    if (screenRecorder) {
+      await screenRecorder.uploadFinalChunk();
+    }
+
+    // Stop all recordings
+    stopAllRecordings();
+
+    // Navigate to completion page
+    showPage('page6');
+  } catch (error) {
+    console.error('Error submitting test:', error);
+    alert('There was an error submitting your test. Please contact support.');
+  }
 }
 
 // Intervention system
@@ -1497,7 +1583,7 @@ function createPeerForAdmin(adminSocketId, deviceType, stream) {
 // ==================== WARMUP MODE ====================
 function startWarmup() {
   if (!testConfig || !testConfig.warmupAudioUrl) {
-    alert('Warmup audio has not been configured for this test. Skipping to actual test.');
+    alert('Warmup audio has not been configured. Skipping to actual test.');
     skipToTest();
     return;
   }
@@ -1505,45 +1591,88 @@ function startWarmup() {
   isWarmupMode = true;
   warmupCompleted = false;
 
-  // Go to pre-session page first
-  startPreSession('warmup');
+  // Update UI to show it's warmup
+  const testHeader = document.querySelector('#page5 .test-header h1');
+  if (testHeader) {
+    testHeader.textContent = 'Warmup Exercise - Practice Mode';
+    testHeader.style.background = 'linear-gradient(135deg, #4caf50 0%, #8bc34a 100%)';
+  }
+
+  // Go directly to test page
+  showPage('page5');
+
+  // Load warmup audio
+  loadWarmup();
 }
 
 function skipToTest() {
   isWarmupMode = false;
 
-  // Go to pre-session page first
-  startPreSession('test');
+  // Go directly to test page
+  showPage('page5');
+  loadSegment(0);
 }
 
-// ==================== PRE-SESSION PREPARATION ====================
+// Load warmup audio
+function loadWarmup() {
+  const audioPlayer = document.getElementById('audioPlayer');
+  const segmentInfo = document.getElementById('segmentInfo');
+
+  audioPlayer.src = testConfig.warmupAudioUrl;
+  segmentInfo.textContent = 'Warmup Exercise - Practice Segment';
+
+  audioPlayer.onended = () => {
+    warmupCompleted = true;
+    isWarmupMode = false;
+
+    if (confirm('Warmup completed! Ready to start the actual test?')) {
+      // Reset header
+      const testHeader = document.querySelector('#page5 .test-header h1');
+      if (testHeader) {
+        testHeader.textContent = 'Consecutive Interpreting Assessment';
+        testHeader.style.background = '';
+      }
+
+      loadSegment(0);
+    }
+  };
+
+  audioPlayer.load();
+}
+
+// ==================== PRE-SESSION MODAL ====================
 let preSessionTimer = null;
 let preSessionTimeRemaining = 60;
-let preSessionNextPage = null;
+let preSessionResolve = null;
 
-function startPreSession(nextMode) {
-  preSessionNextPage = nextMode; // 'warmup' or 'test'
-  preSessionTimeRemaining = 60;
+function openPreSessionModal() {
+  return new Promise((resolve) => {
+    preSessionResolve = resolve;
+    preSessionTimeRemaining = 60;
 
-  // Show pre-session page
-  showPage('pagePreSession');
+    // Show modal
+    const modal = document.getElementById('preSessionModal');
+    modal.style.display = 'flex';
 
-  // Update timer display
-  updatePreSessionTimer();
+    // Update timer display
+    updatePreSessionTimerDisplay();
 
-  // Start countdown
-  preSessionTimer = setInterval(() => {
-    preSessionTimeRemaining--;
-    updatePreSessionTimer();
+    // Start countdown
+    preSessionTimer = setInterval(() => {
+      preSessionTimeRemaining--;
+      updatePreSessionTimerDisplay();
 
-    if (preSessionTimeRemaining <= 0) {
-      finishPreSession();
-    }
-  }, 1000);
+      if (preSessionTimeRemaining <= 0) {
+        finishPreSession();
+      }
+    }, 1000);
+  });
 }
 
-function updatePreSessionTimer() {
-  const timerDisplay = document.getElementById('preSessionTimer');
+function updatePreSessionTimerDisplay() {
+  const timerDisplay = document.getElementById('preSessionTimerDisplay');
+  if (!timerDisplay) return;
+
   const minutes = Math.floor(preSessionTimeRemaining / 60);
   const seconds = preSessionTimeRemaining % 60;
   timerDisplay.textContent = `${minutes}:${String(seconds).padStart(2, '0')}`;
@@ -1565,66 +1694,44 @@ function finishPreSession() {
     preSessionTimer = null;
   }
 
-  // Proceed to warmup or test
-  if (preSessionNextPage === 'warmup') {
-    // Update UI to show it's warmup
-    const testHeader = document.querySelector('#page5 .test-header h1');
-    if (testHeader) {
-      testHeader.textContent = '🏃 Warmup Exercise (Practice)';
-      testHeader.style.color = '#4caf50';
-    }
-    showPage('page5');
-  } else {
-    // Regular test
-    showPage('page5');
-  }
+  // Hide modal
+  const modal = document.getElementById('preSessionModal');
+  modal.style.display = 'none';
+
+  // Show countdown before starting
+  showCountdown();
 }
 
-// Override loadSegment to handle warmup vs actual test
-const originalLoadSegment = loadSegment;
-loadSegment = function(segmentIndex) {
-  if (isWarmupMode && !warmupCompleted) {
-    // Load warmup audio instead of actual segment
-    const audioPlayer = document.getElementById('audioPlayer');
-    const audioControls = document.getElementById('audioControls');
-    const segmentInfo = document.getElementById('segmentInfo');
-    const segmentProgressBar = document.getElementById('segmentProgressBar');
+// Show 3-2-1 countdown
+function showCountdown() {
+  const countdownModal = document.getElementById('countdownModal');
+  const countdownNumber = document.getElementById('countdownNumber');
 
-    // Update UI for warmup
-    segmentInfo.textContent = 'Warmup Exercise - Practice Segment';
-    segmentProgressBar.style.width = '50%';
+  countdownModal.style.display = 'flex';
 
-    audioPlayer.src = testConfig.warmupAudioUrl;
-    audioPlayer.load();
-    audioControls.style.display = 'flex';
+  let count = 3;
+  countdownNumber.textContent = count;
 
-    // When warmup audio ends, offer to continue to real test
-    audioPlayer.onended = () => {
-      warmupCompleted = true;
-      isWarmupMode = false;
+  const countdownInterval = setInterval(() => {
+    count--;
+    if (count > 0) {
+      countdownNumber.textContent = count;
+    } else {
+      clearInterval(countdownInterval);
+      countdownModal.style.display = 'none';
 
-      if (confirm('Warmup completed! Ready to start the actual test?')) {
-        // Reset for actual test
-        currentSegment = 0;
-        interventionCount = 0;
-        repetitionCount = 5;
-
-        // Update header back to normal
-        const testHeader = document.querySelector('#page5 .test-header h1');
-        if (testHeader) {
-          testHeader.textContent = 'Consecutive Interpreting Assessment';
-          testHeader.style.color = '';
-        }
-
-        // Load first actual segment
-        originalLoadSegment(0);
-      } else {
-        // Stay on warmup completion screen
-        segmentInfo.textContent = 'Warmup completed. Refresh page to try again or continue.';
+      // Resume test or start segment playing
+      const audioPlayer = document.getElementById('audioPlayer');
+      if (audioPlayer && audioPlayer.paused) {
+        audioPlayer.play();
       }
-    };
-  } else {
-    // Normal test loading
-    originalLoadSegment(segmentIndex);
-  }
-};
+
+      // Resolve the promise if waiting
+      if (preSessionResolve) {
+        preSessionResolve();
+        preSessionResolve = null;
+      }
+    }
+  }, 1000);
+}
+

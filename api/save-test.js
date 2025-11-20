@@ -21,22 +21,21 @@ module.exports = async (req, res) => {
       }
     }
 
-    // Validate optional URLs if provided
-    if (instructionsAudioUrl && !instructionsAudioUrl.startsWith('http')) {
-      return res.status(400).json({
-        success: false,
-        message: 'Instructions audio URL must be a valid URL',
-      });
-    }
+    // For _UNIVERSAL_INSTRUCTIONS, allow optional warmup field
+    if (testName === '_UNIVERSAL_INSTRUCTIONS') {
+      // Validate optional warmup URL if provided
+      if (warmupAudioUrl && !warmupAudioUrl.startsWith('http')) {
+        return res.status(400).json({
+          success: false,
+          message: 'Warmup audio URL must be a valid URL',
+        });
+      }
 
-    if (warmupAudioUrl && !warmupAudioUrl.startsWith('http')) {
-      return res.status(400).json({
-        success: false,
-        message: 'Warmup audio URL must be a valid URL',
-      });
+      await saveTestSegments(testName, segments, '', warmupAudioUrl || '');
+    } else {
+      // Regular tests don't have warmup/instructions
+      await saveTestSegments(testName, segments);
     }
-
-    await saveTestSegments(testName, segments, instructionsAudioUrl, warmupAudioUrl);
 
     res.json({
       success: true,
