@@ -735,23 +735,44 @@ function startProctorStatusMonitoring() {
   async function checkProctorStatus() {
     if (!sessionData || !sessionData.sessionId) return;
 
+    // CRITICAL FIX: Check the actual video stream, not just the session API
+    // Session API can return 404 if session expired in memory, but WebRTC stream is still active
+    const proctorVideo = document.getElementById('proctorVideo');
+    const hasActiveStream = proctorVideo && proctorVideo.srcObject && proctorVideo.srcObject.active;
+
+    if (hasActiveStream) {
+      // Video stream is active - this is the source of truth
+      statusBox.style.background = 'rgba(232, 245, 233, 0.95)';
+      statusBox.style.color = '#2e7d32';
+      statusBox.textContent = '✓ Connected';
+      return;
+    }
+
+    // If no active stream, check API as backup (but don't trust 404s as "disconnected")
     try {
       const response = await fetch(`/api/session-status/${sessionData.sessionId}`);
+
+      // If API returns 404, ignore it - session might just be expired in memory
+      if (response.status === 404) {
+        // Don't show disconnected warning for 404s
+        return;
+      }
+
       const result = await response.json();
 
       if (result.success && result.proctorDeviceConnected) {
-        // Proctor is connected - minimal green indicator
         statusBox.style.background = 'rgba(232, 245, 233, 0.95)';
         statusBox.style.color = '#2e7d32';
         statusBox.textContent = '✓ Connected';
       } else {
-        // Proctor disconnected - minimal yellow warning
+        // Only show disconnected if API explicitly says so (not 404)
         statusBox.style.background = 'rgba(255, 243, 205, 0.95)';
         statusBox.style.color = '#856404';
         statusBox.textContent = '⚠️ Disconnected';
       }
     } catch (error) {
-      console.error('Error checking proctor status:', error);
+      // Network errors - don't show false disconnection warnings
+      console.log('Proctor status check failed (non-critical):', error);
     }
   }
 }
