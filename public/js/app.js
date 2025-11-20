@@ -1913,9 +1913,16 @@ function startActualTest() {
     testHeader.style.background = '';
   }
 
-  // Show continue button again for actual test
+  // Reset continue button for actual test
   const continueBtn = document.getElementById('continueBtn');
+  const buttonText = document.getElementById('continueButtonText');
   continueBtn.style.display = '';
+  continueBtn.disabled = true;
+  continueBtn.style.opacity = '0.4';
+  continueBtn.style.background = '';
+  if (buttonText) {
+    buttonText.textContent = 'Continue to Next Segment';
+  }
 
   // Show pre-session overlay for the actual test (warmup had its own pre-session)
   showPreSessionOverlay();
@@ -1961,6 +1968,18 @@ function openPreSessionModal() {
     } else {
       console.error('preSessionModal element not found!');
       return;
+    }
+
+    // Update title and description based on warmup vs test
+    const title = document.getElementById('preSessionTitle');
+    const description = document.getElementById('preSessionDescription');
+
+    if (isWarmupMode) {
+      if (title) title.textContent = 'Warmup Pre-Session';
+      if (description) description.innerHTML = 'This is the <strong>practice warmup</strong>. Please perform both <strong>pre-session for patient and provider</strong> now.';
+    } else {
+      if (title) title.textContent = 'Actual Test Pre-Session';
+      if (description) description.innerHTML = 'This is the <strong>graded test</strong>. Please perform both <strong>pre-session for patient and provider</strong> now.';
     }
 
     // Update timer display

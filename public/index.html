@@ -328,8 +328,8 @@
   <!-- Pre-Session Modal -->
   <div id="preSessionModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 10000; align-items: center; justify-content: center;">
     <div style="background: white; padding: 40px; border-radius: 16px; max-width: 600px; text-align: center;">
-      <h2 style="margin-top: 0; color: #333;">Pre-Session Preparation</h2>
-      <p style="font-size: 18px; color: #666; margin: 20px 0;">
+      <h2 id="preSessionTitle" style="margin-top: 0; color: #333;">Pre-Session Preparation</h2>
+      <p id="preSessionDescription" style="font-size: 18px; color: #666; margin: 20px 0;">
         Please perform both <strong>pre-session for patient and provider</strong> now.
       </p>
 
@@ -356,20 +356,26 @@
   <!-- Warmup Completion Modal -->
   <div id="warmupCompletionModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 10001; align-items: center; justify-content: center;">
     <div style="background: white; padding: 50px; border-radius: 16px; max-width: 700px; text-align: center;">
-      <h2 style="margin-top: 0; color: #333; font-size: 32px;">Warmup Complete!</h2>
-      <p style="font-size: 18px; color: #666; margin: 25px 0 40px 0;">
-        What would you like to do next?
+      <h2 style="margin-top: 0; color: #4caf50; font-size: 32px;">✓ Practice Warmup Complete!</h2>
+      <p style="font-size: 18px; color: #666; margin: 25px 0;">
+        Great job! The warmup was just for practice and is <strong>not graded</strong>.
       </p>
 
+      <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 20px; border-radius: 8px; margin: 30px 0; text-align: left;">
+        <p style="margin: 0; font-size: 16px; color: #856404;">
+          <strong>⚠️ Next:</strong> You'll start the <strong>actual graded test</strong>. Your interventions will reset to 10.
+        </p>
+      </div>
+
       <div style="display: flex; flex-direction: column; gap: 15px;">
-        <button onclick="replayInstructions()" style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); color: white; border: none; padding: 20px 30px; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
-          🔄 Play Instructions Again
+        <button onclick="replayInstructions()" style="background: #6c757d; color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+          🔄 Replay Instructions
         </button>
-        <button onclick="redoWarmup()" style="background: linear-gradient(135deg, #4caf50 0%, #8bc34a 100%); color: white; border: none; padding: 20px 30px; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
-          🏃 Do Warmup Again
+        <button onclick="redoWarmup()" style="background: #6c757d; color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+          🏃 Redo Warmup
         </button>
-        <button onclick="startActualTest()" style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); color: white; border: none; padding: 25px 40px; border-radius: 10px; font-size: 20px; font-weight: bold; cursor: pointer; transition: transform 0.2s; box-shadow: 0 6px 20px rgba(0, 137, 123, 0.4);" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
-          ✓ I'm Ready - Start the Test
+        <button onclick="startActualTest()" style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; border: none; padding: 25px 40px; border-radius: 10px; font-size: 22px; font-weight: bold; cursor: pointer; transition: transform 0.2s; box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+          ▶️ I'm Ready - Start GRADED Test Now
         </button>
       </div>
     </div>
