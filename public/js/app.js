@@ -13,6 +13,8 @@ let interventionCount = 0;
 let repetitionCount = 5;
 let testTimer = null;
 let testConfig = null;
+let isWarmupMode = false;
+let warmupCompleted = false;
 
 // Test configuration - will be loaded based on permitted test
 const TEST_CONFIGS = {
@@ -524,6 +526,16 @@ showPage = async function(pageId) {
 
   if (pageId === 'page3') {
     setupProctorPage();
+  }
+
+  if (pageId === 'pageTestInstructions') {
+    // Load instructions audio from test config
+    if (testConfig && testConfig.instructionsAudioUrl) {
+      const audioSource = document.getElementById('testInstructionsSource');
+      const audioPlayer = document.getElementById('testInstructionsAudio');
+      audioSource.src = testConfig.instructionsAudioUrl;
+      audioPlayer.load();
+    }
   }
 
   if (pageId === 'page5') {
@@ -1474,3 +1486,78 @@ function createPeerForAdmin(adminSocketId, deviceType, stream) {
     console.error('[Live Monitoring] Failed to create peer (non-fatal):', error);
   }
 }
+
+// ==================== WARMUP MODE ====================
+function startWarmup() {
+  if (!testConfig || !testConfig.warmupAudioUrl) {
+    alert('Warmup audio has not been configured for this test. Skipping to actual test.');
+    skipToTest();
+    return;
+  }
+
+  isWarmupMode = true;
+  warmupCompleted = false;
+
+  // Update UI to show it's warmup
+  const testHeader = document.querySelector('#page5 .test-header h1');
+  if (testHeader) {
+    testHeader.textContent = '🏃 Warmup Exercise (Practice)';
+    testHeader.style.color = '#4caf50';
+  }
+
+  showPage('page5');
+}
+
+function skipToTest() {
+  isWarmupMode = false;
+  showPage('page5');
+}
+
+// Override loadSegment to handle warmup vs actual test
+const originalLoadSegment = loadSegment;
+loadSegment = function(segmentIndex) {
+  if (isWarmupMode && !warmupCompleted) {
+    // Load warmup audio instead of actual segment
+    const audioPlayer = document.getElementById('audioPlayer');
+    const audioControls = document.getElementById('audioControls');
+    const segmentInfo = document.getElementById('segmentInfo');
+    const segmentProgressBar = document.getElementById('segmentProgressBar');
+
+    // Update UI for warmup
+    segmentInfo.textContent = 'Warmup Exercise - Practice Segment';
+    segmentProgressBar.style.width = '50%';
+
+    audioPlayer.src = testConfig.warmupAudioUrl;
+    audioPlayer.load();
+    audioControls.style.display = 'flex';
+
+    // When warmup audio ends, offer to continue to real test
+    audioPlayer.onended = () => {
+      warmupCompleted = true;
+      isWarmupMode = false;
+
+      if (confirm('Warmup completed! Ready to start the actual test?')) {
+        // Reset for actual test
+        currentSegment = 0;
+        interventionCount = 0;
+        repetitionCount = 5;
+
+        // Update header back to normal
+        const testHeader = document.querySelector('#page5 .test-header h1');
+        if (testHeader) {
+          testHeader.textContent = 'Consecutive Interpreting Assessment';
+          testHeader.style.color = '';
+        }
+
+        // Load first actual segment
+        originalLoadSegment(0);
+      } else {
+        // Stay on warmup completion screen
+        segmentInfo.textContent = 'Warmup completed. Refresh page to try again or continue.';
+      }
+    };
+  } else {
+    // Normal test loading
+    originalLoadSegment(segmentIndex);
+  }
+};
