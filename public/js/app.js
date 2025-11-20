@@ -535,8 +535,6 @@ showPage = async function(pageId) {
       mainRecorder = new RecordingManager('main', sessionData.sessionId);
       await mainRecorder.startRecording(mainStream);
 
-      document.getElementById('mainRecording').classList.add('active');
-
       // Request screen sharing
       try {
         screenStream = await navigator.mediaDevices.getDisplayMedia({
