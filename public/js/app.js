@@ -633,11 +633,11 @@ showPage = async function(pageId) {
       initializeLiveMonitoring();
 
       // Show pre-session overlay - test cannot start until pre-session is done
-      // But NOT during warmup - warmup should start immediately
       if (!isWarmupMode) {
+        console.log('Showing pre-session overlay for test');
         showPreSessionOverlay();
       } else {
-        // For warmup, go directly to pre-session modal
+        console.log('Starting pre-session modal for warmup');
         startMandatoryPreSession();
       }
     }
@@ -1779,8 +1779,8 @@ function startActualTest() {
   const continueBtn = document.getElementById('continueBtn');
   continueBtn.style.display = '';
 
-  // User already did pre-session before warmup, so just start the test directly
-  loadSegment(0);
+  // Show pre-session overlay for the actual test (warmup had its own pre-session)
+  showPreSessionOverlay();
 }
 
 // ==================== PRE-SESSION OVERLAY ====================
@@ -1788,14 +1788,19 @@ let hasCompletedPreSession = false;
 
 // Show blocking overlay that forces pre-session before test starts
 function showPreSessionOverlay() {
+  console.log('showPreSessionOverlay() called');
   const overlay = document.getElementById('preSessionOverlay');
   if (overlay) {
     overlay.style.display = 'flex';
+    console.log('Pre-session overlay displayed');
+  } else {
+    console.error('preSessionOverlay element not found!');
   }
   hasCompletedPreSession = false;
 }
 
 function startMandatoryPreSession() {
+  console.log('startMandatoryPreSession() called');
   openPreSessionModal();
 }
 
@@ -1805,13 +1810,20 @@ let preSessionTimeRemaining = 60;
 let preSessionResolve = null;
 
 function openPreSessionModal() {
+  console.log('openPreSessionModal() called');
   return new Promise((resolve) => {
     preSessionResolve = resolve;
     preSessionTimeRemaining = 60;
 
     // Show modal
     const modal = document.getElementById('preSessionModal');
-    modal.style.display = 'flex';
+    if (modal) {
+      modal.style.display = 'flex';
+      console.log('Pre-session modal displayed, starting 60s countdown');
+    } else {
+      console.error('preSessionModal element not found!');
+      return;
+    }
 
     // Update timer display
     updatePreSessionTimerDisplay();
