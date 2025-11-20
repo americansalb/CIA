@@ -156,14 +156,40 @@ async function getTestConfig(testName) {
     let instructionsAudioUrl = '';
     let warmupAudioUrl = '';
 
+    // ALSO load universal instructions and warmup from _UNIVERSAL_INSTRUCTIONS
+    let universalInstructionsUrl = '';
+    let universalWarmupSegments = [];
+
     for (let i = 1; i < rows.length; i++) {
       const [name, segmentNum, audioUrl, status, instructions, warmup] = rows[i];
+
+      // Load universal instructions and warmup
+      if (name === '_UNIVERSAL_INSTRUCTIONS' && status === 'active') {
+        if (!universalInstructionsUrl && audioUrl) {
+          universalInstructionsUrl = audioUrl;
+        }
+        if (warmup) {
+          try {
+            const parsed = JSON.parse(warmup);
+            if (Array.isArray(parsed)) {
+              universalWarmupSegments = parsed;
+            }
+          } catch (e) {
+            // Not JSON, treat as single URL
+            if (warmup.trim()) {
+              universalWarmupSegments = [warmup];
+            }
+          }
+        }
+      }
+
+      // Load test segments
       if (name === testName && status === 'active') {
         segments.push({
           segmentNumber: parseInt(segmentNum),
           audioUrl,
         });
-        // Read instructions and warmup URLs from any row (they're duplicated across all segments)
+        // Read instructions and warmup URLs from test row (for backward compatibility)
         if (!instructionsAudioUrl && instructions) {
           instructionsAudioUrl = instructions;
         }
@@ -176,7 +202,7 @@ async function getTestConfig(testName) {
     // Sort by segment number
     segments.sort((a, b) => a.segmentNumber - b.segmentNumber);
 
-    // Parse warmup segments from JSON if it's an array
+    // Parse warmup segments from test row (backward compatibility)
     let warmupSegments = [];
     if (warmupAudioUrl) {
       try {
@@ -192,12 +218,20 @@ async function getTestConfig(testName) {
       }
     }
 
+    // PRIORITY: Universal instructions/warmup override test-specific ones
+    const finalInstructionsUrl = universalInstructionsUrl || instructionsAudioUrl;
+    const finalWarmupSegments = universalWarmupSegments.length > 0 ? universalWarmupSegments : warmupSegments;
+    const finalWarmupUrl = finalWarmupSegments.length === 0 ? warmupAudioUrl : '';
+
+    console.log(`getTestConfig(${testName}): Found ${finalWarmupSegments.length} warmup segments from universal instructions`);
+
     return {
       testName,
       segments: segments.map(s => s.audioUrl),
-      instructionsAudioUrl: instructionsAudioUrl || '',
-      warmupAudioUrl: warmupAudioUrl || '',
-      warmupSegments: warmupSegments,
+      instructionsAudioUrl: finalInstructionsUrl || '',
+      warmupAudioUrl: finalWarmupUrl || '',
+      warmupSegments: finalWarmupSegments,
+      universalInstructionsUrl: finalInstructionsUrl || '',
     };
   } catch (error) {
     console.error('Error getting test config:', error);
