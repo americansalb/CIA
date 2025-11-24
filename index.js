@@ -49,13 +49,13 @@ app.get('/proctor', (req, res) => {
 });
 
 // Socket.io for live monitoring and WebRTC signaling
-const activeSessions = new Map(); // Track active test sessions
+const { setSession, getSession, hasSession, deleteSession, getAllSessions, updateSession } = require('./utils/redis-client');
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
   // Student joins with session info
-  socket.on('join-session', ({ sessionId, email, role }) => {
+  socket.on('join-session', async ({ sessionId, email, role }) => {
     console.log(`${role} joined session:`, sessionId, email);
 
     socket.join(sessionId);
@@ -65,22 +65,25 @@ io.on('connection', (socket) => {
 
     // Track active session
     if (role === 'student') {
-      if (!activeSessions.has(sessionId)) {
-        activeSessions.set(sessionId, {
+      const exists = await hasSession(sessionId);
+      if (!exists) {
+        await setSession(sessionId, {
           sessionId,
           email,
-          connectedAt: new Date(),
+          connectedAt: new Date().toISOString(),
           studentSocketId: socket.id,
         });
       }
 
       // Notify all admins about active sessions
-      io.emit('active-sessions', Array.from(activeSessions.values()));
+      const sessions = await getAllSessions();
+      io.emit('active-sessions', sessions);
     }
 
     // If admin joins, send them current active sessions immediately
     if (role === 'admin') {
-      socket.emit('active-sessions', Array.from(activeSessions.values()));
+      const sessions = await getAllSessions();
+      socket.emit('active-sessions', sessions);
     }
   });
 
@@ -122,12 +125,14 @@ io.on('connection', (socket) => {
   });
 
   // Session progress updates (current segment, time, etc)
-  socket.on('session-update', (data) => {
-    const session = activeSessions.get(socket.sessionId);
+  socket.on('session-update', async (data) => {
+    const session = await getSession(socket.sessionId);
     if (session) {
-      session.currentSegment = data.currentSegment;
-      session.totalSegments = data.totalSegments;
-      session.elapsedTime = data.elapsedTime;
+      await updateSession(socket.sessionId, {
+        currentSegment: data.currentSegment,
+        totalSegments: data.totalSegments,
+        elapsedTime: data.elapsedTime
+      });
 
       // Broadcast update to admins
       io.emit('session-progress', {
@@ -138,13 +143,14 @@ io.on('connection', (socket) => {
   });
 
   // Handle disconnection
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     console.log('Client disconnected:', socket.id);
 
     // Remove from active sessions if student
     if (socket.role === 'student' && socket.sessionId) {
-      activeSessions.delete(socket.sessionId);
-      io.emit('active-sessions', Array.from(activeSessions.values()));
+      await deleteSession(socket.sessionId);
+      const sessions = await getAllSessions();
+      io.emit('active-sessions', sessions);
     }
   });
 });
