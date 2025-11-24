@@ -32,6 +32,7 @@ app.get('/api/test-config', require('./api/get-test-config'));
 app.post('/api/save-test', require('./api/save-test'));
 app.post('/api/split-and-upload', require('./api/split-and-upload'));
 app.post('/api/save-emergency-state', require('./api/save-emergency-state'));
+app.post('/api/log-client-error', require('./api/log-client-error'));
 
 // Serve main app
 app.get('/', (req, res) => {

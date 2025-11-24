@@ -118,6 +118,10 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
       if (sessionResult.success) {
         sessionData = sessionResult;
 
+        // Set session ID for error logging
+        errorLogger.setSessionId(sessionData.sessionId);
+        console.log('✓ Error logging initialized for session:', sessionData.sessionId);
+
         // Check for unfinished sessions for this user
         checkForRecovery(studentData.email);
 
@@ -1098,6 +1102,36 @@ function loadSegment(index) {
 
   console.log(`Loading ${isWarmupMode ? 'warmup' : 'test'} segment ${index + 1}/${testConfig.segments.length}:`, segmentUrl);
 
+  // COMPREHENSIVE ERROR HANDLING: Validate URL before loading
+  if (!segmentUrl || typeof segmentUrl !== 'string') {
+    const error = `Invalid audio URL: ${segmentUrl}`;
+    console.error(error);
+    errorLogger.logError('AUDIO', error, '', window.location.href);
+    alert(`Audio configuration error. Segment ${index + 1} has an invalid URL. Please contact support.`);
+    return;
+  }
+
+  // Clear previous error handlers
+  audioPlayer.onerror = null;
+  audioPlayer.onloadedmetadata = null;
+
+  // Add error handler BEFORE setting src
+  audioPlayer.onerror = function(e) {
+    const errorMsg = `Failed to load audio segment ${index + 1}/${testConfig.segments.length}`;
+    const errorDetails = `URL: ${segmentUrl}, Error code: ${audioPlayer.error?.code}, Message: ${audioPlayer.error?.message}`;
+
+    console.error(errorMsg, errorDetails);
+    errorLogger.logError('AUDIO_LOAD', `${errorMsg} - ${errorDetails}`, '', segmentUrl);
+
+    alert(`❌ Audio Failed to Load\n\nSegment ${index + 1} could not be loaded.\n\nPossible causes:\n- CDN configuration issue\n- File not found\n- Network problem\n\nPlease contact support with this error.`);
+  };
+
+  // Add success handler
+  audioPlayer.onloadedmetadata = function() {
+    console.log(`✓ Audio segment ${index + 1} loaded successfully (duration: ${audioPlayer.duration}s)`);
+  };
+
+  // Set source
   audioPlayer.src = segmentUrl;
 
   // Update segment info - different text for warmup vs test
@@ -1115,8 +1149,10 @@ function loadSegment(index) {
 
   // Auto-play the segment
   audioPlayer.play().catch(err => {
-    console.error('Audio playback error:', err);
-    alert('Failed to play audio. Please check your connection and try again.');
+    const errorMsg = `Audio playback error: ${err.name} - ${err.message}`;
+    console.error(errorMsg);
+    errorLogger.logError('AUDIO_PLAY', errorMsg, err.stack, segmentUrl);
+    alert(`❌ Failed to play audio\n\nSegment ${index + 1} - ${err.message}\n\nPlease check your connection and try again.`);
   });
 
   // When audio ends, enable continue button
