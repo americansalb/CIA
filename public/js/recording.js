@@ -174,11 +174,33 @@ class RecordingManager {
     await recordingBackup.init();
 
     try {
+      // ADAPTIVE BITRATE: Detect connection speed and adjust quality
+      let videoBitsPerSecond = 2000000; // 2 Mbps default - smooth HD video
+      let audioBitsPerSecond = 192000; // 192 kbps - excellent audio for transcription
+
+      // Check network connection (if available)
+      const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (connection) {
+        const effectiveType = connection.effectiveType;
+        console.log(`[${this.deviceType}] Detected connection: ${effectiveType}`);
+
+        // Adaptive bitrate based on connection
+        if (effectiveType === '4g') {
+          videoBitsPerSecond = 2000000; // 2 Mbps - full quality
+        } else if (effectiveType === '3g') {
+          videoBitsPerSecond = 800000; // 800 kbps - reduced quality
+          console.warn(`[${this.deviceType}] Reducing quality for 3G connection`);
+        } else if (effectiveType === '2g' || effectiveType === 'slow-2g') {
+          videoBitsPerSecond = 400000; // 400 kbps - minimal quality
+          console.warn(`[${this.deviceType}] Using minimal quality for slow connection`);
+        }
+      }
+
       // Use good video quality for smooth playback, excellent audio for transcription
       // CRITICAL: iOS Safari only supports MP4, not WebM!
       let options = {
-        videoBitsPerSecond: 2000000, // 2 Mbps - smooth HD video
-        audioBitsPerSecond: 192000, // 192 kbps - excellent audio for transcription
+        videoBitsPerSecond,
+        audioBitsPerSecond,
       };
 
       // Try formats in order of preference
@@ -315,20 +337,38 @@ class RecordingManager {
       lastChunkNumber: this.chunkNumber,
     });
 
-    // Add to upload queue
-    this.uploadQueue.push({ chunkId, blob, chunkNumber: this.chunkNumber });
+    // TRAFFIC SPIKE PREVENTION: Random delay (0-15 seconds) to stagger uploads
+    // This prevents all users from uploading at the exact same moment
+    const randomDelay = Math.floor(Math.random() * 15000);
+    console.log(`[${this.deviceType}] Chunk ${this.chunkNumber} saved locally, uploading in ${randomDelay}ms`);
 
-    // Process queue
-    this.processUploadQueue();
+    // Add to upload queue with delay
+    this.uploadQueue.push({ chunkId, blob, chunkNumber: this.chunkNumber, scheduledTime: Date.now() + randomDelay });
+
+    // Process queue after delay
+    setTimeout(() => this.processUploadQueue(), randomDelay);
   }
 
   async processUploadQueue() {
     if (this.isUploading || this.uploadQueue.length === 0) return;
 
+    // UPLOAD QUEUE MONITORING: Warn if uploads are backing up
+    if (this.uploadQueue.length > 5) {
+      console.warn(`[${this.deviceType}] Upload queue backing up: ${this.uploadQueue.length} pending uploads`);
+      // If queue is very long, we might be on a slow connection
+      // Data is safe in IndexedDB, will retry until successful
+    }
+
     this.isUploading = true;
 
     while (this.uploadQueue.length > 0) {
-      const { chunkId, blob, chunkNumber } = this.uploadQueue[0];
+      const { chunkId, blob, chunkNumber, scheduledTime } = this.uploadQueue[0];
+
+      // If this chunk has a scheduled time and it's not reached yet, skip for now
+      if (scheduledTime && Date.now() < scheduledTime) {
+        console.log(`[${this.deviceType}] Chunk ${chunkNumber} not ready yet, waiting...`);
+        break;
+      }
 
       const success = await this.uploadChunkWithRetry(chunkId, blob, chunkNumber);
 
@@ -341,7 +381,7 @@ class RecordingManager {
         await recordingBackup.markChunkUploaded(chunkId);
 
         // Silent success - don't notify user about technical chunks
-        console.log(`[${this.deviceType}] Chunk ${chunkNumber} uploaded successfully`);
+        console.log(`[${this.deviceType}] Chunk ${chunkNumber} uploaded successfully (${this.uploadQueue.length} remaining in queue)`);
       } else {
         // If upload failed after retries, keep in queue and try again later
         console.warn(`[${this.deviceType}] Chunk ${chunkNumber} upload failed, will retry later`);
@@ -350,6 +390,11 @@ class RecordingManager {
     }
 
     this.isUploading = false;
+
+    // If there are still items in queue, schedule another process attempt
+    if (this.uploadQueue.length > 0) {
+      setTimeout(() => this.processUploadQueue(), 5000); // Try again in 5 seconds
+    }
   }
 
   async uploadChunkWithRetry(chunkId, blob, chunkNumber, attempt = 1) {
