@@ -509,19 +509,29 @@ class RecordingManager {
 
     // CRITICAL: Wait for ALL chunks to upload - NEVER proceed with pending uploads
     console.log(`[${this.deviceType}] Waiting for all chunks to upload...`);
-    // User-friendly message without technical details
-    this.showNotification('Saving recording...', 'info', 0);
+
+    // Show upload progress modal (only for main device to avoid duplicate modals)
+    if (this.deviceType === 'main') {
+      this.showUploadProgressModal();
+    }
+
+    // Prevent window close during upload
+    this.preventWindowClose = true;
+    window.onbeforeunload = () => "⚠️ Upload in progress! Closing now may result in data loss.";
 
     let waitCount = 0;
     while (this.uploadQueue.length > 0) {
       waitCount++;
-      if (waitCount % 10 === 0) {
-        const status = this.getUploadStatus();
-        console.log(`[${this.deviceType}] Still waiting... Pending: ${status.pendingUploads}, Uploaded: ${status.uploadedChunks}/${status.totalChunks}`);
-        // Show simple percentage progress without technical details
+      const status = this.getUploadStatus();
+
+      // Update progress every second
+      if (this.deviceType === 'main') {
         const percentComplete = Math.floor((status.uploadedChunks / status.totalChunks) * 100);
-        this.showNotification(`Saving... ${percentComplete}%`, 'info', 0);
+        this.updateUploadProgress(percentComplete, `Uploaded ${status.uploadedChunks} of ${status.totalChunks} segments...`);
       }
+
+      console.log(`[${this.deviceType}] Upload progress: ${status.uploadedChunks}/${status.totalChunks} (${this.uploadQueue.length} in queue)`);
+
       await new Promise(resolve => setTimeout(resolve, 1000));
       await this.processUploadQueue();
     }
@@ -530,8 +540,10 @@ class RecordingManager {
     const unuploaded = await recordingBackup.getUnuploadedChunks(this.sessionId);
     if (unuploaded.length > 0) {
       console.error(`[${this.deviceType}] CRITICAL: ${unuploaded.length} chunks still not uploaded!`);
-      // User-friendly message - hide technical "chunks" terminology
-      this.showNotification(`Finalizing upload...`, 'info', 0);
+
+      if (this.deviceType === 'main') {
+        this.updateUploadProgress(95, `Finalizing upload... (${unuploaded.length} remaining)`);
+      }
 
       // Add them back to queue
       for (const chunk of unuploaded) {
@@ -550,8 +562,48 @@ class RecordingManager {
     }
 
     console.log(`[${this.deviceType}] All chunks uploaded successfully`);
-    // Simple user-friendly message
-    this.showNotification('Recording saved successfully', 'success', 2000);
+
+    // Final progress update
+    if (this.deviceType === 'main') {
+      this.updateUploadProgress(100, 'Upload complete! ✓');
+      await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause to show 100%
+    }
+
+    // Re-enable window close
+    this.preventWindowClose = false;
+    window.onbeforeunload = null;
+  }
+
+  showUploadProgressModal() {
+    const modal = document.getElementById('uploadProgressModal');
+    if (modal) {
+      modal.style.display = 'flex';
+    }
+  }
+
+  updateUploadProgress(percent, statusText) {
+    const progressBar = document.getElementById('uploadProgressBar');
+    const progressText = document.getElementById('uploadProgressText');
+    const statusTextElem = document.getElementById('uploadStatusText');
+
+    if (progressBar) {
+      progressBar.style.width = `${percent}%`;
+    }
+
+    if (progressText) {
+      progressText.textContent = `${percent}%`;
+    }
+
+    if (statusTextElem && statusText) {
+      statusTextElem.textContent = statusText;
+    }
+  }
+
+  hideUploadProgressModal() {
+    const modal = document.getElementById('uploadProgressModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
   }
 
   async uploadFinalVideo(interventionCount = 0) {

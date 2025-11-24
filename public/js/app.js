@@ -1391,6 +1391,11 @@ async function endTest(reason = 'Test completed') {
   // Mark test as complete (enables safe page closing)
   markTestComplete();
 
+  // Hide upload progress modal (if it was shown)
+  if (mainRecorder) {
+    mainRecorder.hideUploadProgressModal();
+  }
+
   // Calculate duration
   const duration = Math.floor((Date.now() - testStartTime) / 1000);
   const minutes = Math.floor(duration / 60);
