@@ -31,62 +31,8 @@
       </form>
 
       <p style="text-align: center; margin-top: 30px; color: #888;">
-        <a href="/admin" style="color: #667eea; text-decoration: none;">Administrator Login</a>
+        <a href="/admin" style="color: #00897b; text-decoration: none;">Administrator Login</a>
       </p>
-    </div>
-
-    <!-- Universal Instructions Page -->
-    <div id="pageInstructions" class="page">
-      <h1>Test Instructions</h1>
-      <p>Please watch the following video for important information about the test format, procedures, and camera setup.</p>
-
-      <div style="max-width: 800px; margin: 30px auto; background: #000; border-radius: 8px;">
-        <video
-          id="universalInstructionsVideo"
-          controls
-          autoplay
-          playsinline
-          style="width: 100%; border-radius: 8px;"
-        >
-          Your browser does not support the video tag.
-        </video>
-      </div>
-
-      <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 20px 0;">
-        <p style="margin: 0; color: #1976d2;">
-          <strong>📌 Note:</strong> You can continue after watching the video or skip after 5 seconds if you've seen it before.
-        </p>
-      </div>
-
-      <button id="instructionsContinueBtn" onclick="showPage('page2')" disabled>Please wait...</button>
-    </div>
-
-    <!-- Page 2: Instructions -->
-    <div id="page2" class="page">
-      <h1>Test Instructions</h1>
-
-      <div id="testInfo" class="success-message"></div>
-
-      <h2>Important Guidelines:</h2>
-      <ul style="margin-left: 20px; margin-bottom: 20px; color: #555; line-height: 1.8;">
-        <li>You will need TWO devices for this test (e.g., computer + phone)</li>
-        <li>Your main device will display the test and record your interpretation</li>
-        <li>Your second device (proctoring device) will provide an additional camera angle</li>
-        <li>Both cameras must be active throughout the entire test</li>
-        <li>You will interpret from English into your target language</li>
-        <li>Maximum test duration: 35 minutes</li>
-        <li>You may request up to 5 interventions without penalty</li>
-        <li>Maximum 10 interventions allowed per test</li>
-        <li>All recordings are automatically uploaded to prevent data loss</li>
-      </ul>
-
-      <h2>Intervention Types:</h2>
-      <ul style="margin-left: 20px; margin-bottom: 20px; color: #555; line-height: 1.8;">
-        <li><strong>Request Repetition:</strong> Ask the speaker to repeat the last segment</li>
-        <li><strong>Request Research Pause:</strong> Take up to 90 seconds to look up terminology</li>
-      </ul>
-
-      <button onclick="showPage('page4')">I Understand - Continue</button>
     </div>
 
     <!-- Page 4: Camera/Mic Permissions (MOVED BEFORE PROCTOR) -->
@@ -114,7 +60,7 @@
 
       <div style="text-align: center;">
         <button id="requestPermissionsBtn" onclick="requestPermissions()">Grant Permissions</button>
-        <button onclick="showPage('page3')" id="continueToProctorBtn" disabled>Continue to Proctor Setup</button>
+        <button onclick="requestScreenShareAndContinue()" id="continueToProctorBtn" disabled>Continue to Proctor Setup</button>
       </div>
     </div>
 
@@ -123,19 +69,22 @@
       <h1>Connect Second Camera</h1>
       <p>Set up your second device (phone/tablet) to provide an additional camera angle.</p>
 
-      <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 12px; margin: 25px 0; color: white; text-align: center;">
+      <div style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); padding: 30px; border-radius: 12px; margin: 25px 0; color: white; text-align: center;">
         <h2 style="margin: 0 0 15px 0; color: white; font-size: 24px;">Your Proctor PIN:</h2>
-        <div id="pinDisplay" style="font-size: 64px; font-weight: bold; letter-spacing: 12px; background: white; color: #667eea; padding: 25px; border-radius: 10px; margin: 15px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">------</div>
+        <div id="pinDisplay" style="font-size: 64px; font-weight: bold; letter-spacing: 12px; background: white; color: #00897b; padding: 25px; border-radius: 10px; margin: 15px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">------</div>
       </div>
 
       <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
         <h3 style="margin-top: 0; color: #333;">📱 On Your Phone/Tablet:</h3>
         <ol style="margin: 15px 0; padding-left: 25px; line-height: 1.8; color: #555;">
           <li>Open your browser</li>
-          <li>Go to: <strong id="proctorUrl" style="color: #667eea;">Loading...</strong></li>
+          <li>Go to: <strong id="proctorUrl" style="color: #00897b;">Loading...</strong></li>
           <li>Enter the PIN shown above</li>
           <li>Grant camera permissions</li>
         </ol>
+        <button id="emailProctorInfoBtn" onclick="emailProctorInfo()" style="background: #00897b; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; margin-top: 10px;">
+          📧 Email Link to Phone
+        </button>
       </div>
 
       <div style="padding: 15px; background: #fff3cd; border-radius: 6px; border-left: 4px solid #ffc107; margin: 20px 0;">
@@ -150,70 +99,121 @@
         ✓ Second camera connected! Ready to proceed.
       </div>
 
-      <button id="proceedBtn" onclick="showPage('page5')" disabled>Continue to Test</button>
+      <button id="proceedBtn" onclick="showPage('pageTestInstructions')" disabled>Continue to Instructions</button>
     </div>
 
-    <!-- Page 5: Test Interface -->
+    <!-- Page: Universal Instructions (Video or Audio) -->
+    <div id="pageTestInstructions" class="page">
+      <h1>Test Instructions</h1>
+      <p>Please watch or listen carefully to the following instructions.</p>
+
+      <div style="max-width: 800px; margin: 30px auto;">
+        <!-- Video player (shown if video URL provided) -->
+        <video
+          id="universalInstructionsMedia"
+          controls
+          style="width: 100%; border-radius: 8px; background: #000; display: none;"
+        >
+          Your browser does not support video/audio playback.
+        </video>
+      </div>
+
+
+      <div style="display: flex; flex-direction: column; gap: 15px; max-width: 500px; margin: 30px auto;">
+        <button onclick="replayInstructionsAudio()" style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer;">
+          🔄 Repeat Instructions
+        </button>
+        <button onclick="startWarmup()" style="background: linear-gradient(135deg, #4caf50 0%, #8bc34a 100%); color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer;">
+          🏃 Start Warm Up
+        </button>
+        <button onclick="skipToTest()" style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer;">
+          ⏭️ No Warm Up Needed - Begin Test
+        </button>
+      </div>
+    </div>
+
+    <!-- Page: Warmup Choice -->
+    <div id="pageWarmupChoice" class="page">
+      <h1>Warmup Exercise</h1>
+      <p>Would you like to do a practice warmup exercise before starting the actual test?</p>
+
+      <div style="background: #f5f5f5; padding: 25px; border-radius: 8px; margin: 30px 0;">
+        <h3 style="margin-top: 0; color: #333;">What is the warmup?</h3>
+        <p style="color: #666; line-height: 1.6;">
+          The warmup is a practice segment using the exact same format as the actual test.
+          It helps you get comfortable with the interface, audio player, and intervention features.
+        </p>
+        <p style="color: #666; line-height: 1.6; margin-bottom: 0;">
+          <strong>Important:</strong> The warmup does not count toward your grade.
+        </p>
+      </div>
+
+      <div style="display: flex; gap: 20px; justify-content: center; margin-top: 30px;">
+        <button onclick="startWarmup()" style="background: #4caf50; padding: 20px 40px; font-size: 18px;">
+          🏃 Start Warmup
+        </button>
+        <button onclick="skipToTest()" style="background: #00897b; padding: 20px 40px; font-size: 18px;">
+          ⏭️ Skip to Actual Test
+        </button>
+      </div>
+    </div>
+
+<!-- Page 5: Test Interface -->
     <div id="page5" class="page">
       <div class="test-header">
         <h1>Consecutive Interpreting Assessment</h1>
         <div class="timer-display" id="timerDisplay">00:00</div>
       </div>
 
-      <!-- Recording Notifications -->
-      <div id="mainNotification" class="recording-notification" style="display: none;"></div>
-
-      <!-- Upload Status Indicator -->
-      <div id="uploadStatus" class="upload-status" style="display: none;"></div>
-
       <div class="segment-info">
-        <span id="segmentInfo">Loading...</span>
         <div class="segment-progress">
           <div class="segment-progress-bar" id="segmentProgressBar"></div>
         </div>
+        <span id="segmentInfo" style="font-size: 14px; color: #666; margin-top: 8px; display: block;">Loading...</span>
       </div>
 
-      <!-- Quality Monitoring Indicator -->
-      <div id="testQualityMonitor" style="background: #e3f2fd; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-size: 14px; display: none;">
-        <strong>📹 Continuous Monitoring Active:</strong>
-        <span id="testFaceStatus" style="margin-left: 10px;">Face: ✓</span>
-        <span id="testLightingStatus" style="margin-left: 10px;">Lighting: ✓</span>
+      <!-- Face Position Warning - Only shows when needed -->
+      <div id="faceWarning" style="display: none; background: #ff5722; color: white; padding: 12px 20px; border-radius: 6px; margin-bottom: 15px; font-size: 16px; font-weight: 600; text-align: center; animation: pulse 1.5s infinite;">
+        ⚠️ <span id="faceWarningText">Center your face in the camera</span>
       </div>
 
-      <!-- Audio Input Visualization -->
-      <div id="audioVisualization" style="background: #f5f5f5; padding: 15px; border-radius: 6px; margin-bottom: 15px; display: none;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-          <strong style="color: #333;">🎤 Microphone Input:</strong>
-          <span id="audioStatus" style="color: #4caf50; font-weight: 600;">● Active</span>
-        </div>
-        <div style="background: #ddd; height: 30px; border-radius: 15px; overflow: hidden; position: relative;">
-          <div id="audioLevelBar" style="background: linear-gradient(90deg, #4caf50 0%, #8bc34a 50%, #ffeb3b 75%, #ff9800 100%); height: 100%; width: 0%; transition: width 0.1s ease-out; border-radius: 15px;"></div>
-        </div>
-        <div style="font-size: 12px; color: #666; margin-top: 5px; text-align: center;">
-          <span id="audioLevelText">0%</span>
-        </div>
-      </div>
+      <div class="video-container" style="display: grid; grid-template-columns: 3fr 1fr; gap: 15px; margin-bottom: 20px;">
+        <!-- Main Test Screen - Largest, most prominent -->
+        <div class="video-preview" style="grid-column: 1; grid-row: 1; position: relative;">
+          <video id="mainVideo" autoplay muted playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
+          <div class="video-label">Your Camera</div>
 
-      <div class="video-container">
-        <div class="video-preview">
-          <video id="mainVideo" autoplay muted playsinline></video>
-          <div class="video-label">Main Camera</div>
-          <div class="recording-indicator active" id="mainRecording">
-            <span class="rec-dot"></span>
-            <span>REC</span>
+          <!-- Recording indicator for main camera -->
+          <div id="mainRecordingIndicator" style="position: absolute; top: 8px; right: 8px; background: rgba(220, 53, 69, 0.95); border-radius: 4px; padding: 4px 8px; font-size: 11px; color: white; font-weight: bold; display: flex; align-items: center; gap: 6px; display: none;">
+            <span class="recording-dot" style="width: 8px; height: 8px; background: white; border-radius: 50%; animation: pulse 1.5s ease-in-out infinite;"></span>
+            REC
           </div>
-          <div class="connection-status" id="mainConnectionStatus">
-            <span class="status-dot"></span>
-            <span class="status-text">Connected</span>
+
+          <!-- Microphone indicator for main camera -->
+          <div id="mainMicIndicator" style="position: absolute; top: 38px; right: 8px; background: rgba(0, 0, 0, 0.7); border-radius: 4px; padding: 4px 8px; font-size: 20px; display: none;">
+            <span id="mainMicIcon" style="display: inline-block;">🎤</span>
           </div>
         </div>
 
-        <div class="video-preview">
-          <video id="proctorVideo" autoplay muted playsinline></video>
-          <div class="video-label">Proctor Camera</div>
-          <div class="recording-indicator active" id="proctorRecording">
-            <span class="rec-dot"></span>
-            <span>REC</span>
+        <!-- Proctor Camera - Compact side view with status -->
+        <div class="video-preview" style="grid-column: 2; grid-row: 1; position: relative;">
+          <video id="proctorVideo" autoplay muted playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
+          <div class="video-label">Second Camera</div>
+
+          <!-- Recording indicator -->
+          <div id="proctorRecordingIndicator" style="position: absolute; top: 8px; right: 8px; background: rgba(220, 53, 69, 0.95); border-radius: 4px; padding: 4px 8px; font-size: 11px; color: white; font-weight: bold; display: flex; align-items: center; gap: 6px; display: none;">
+            <span class="recording-dot" style="width: 8px; height: 8px; background: white; border-radius: 50%; animation: pulse 1.5s ease-in-out infinite;"></span>
+            REC
+          </div>
+
+          <!-- Microphone indicator -->
+          <div id="proctorMicIndicator" style="position: absolute; top: 38px; right: 8px; background: rgba(0, 0, 0, 0.7); border-radius: 4px; padding: 4px 8px; font-size: 20px; display: none;">
+            <span id="proctorMicIcon" style="display: inline-block;">🎤</span>
+          </div>
+
+          <!-- Single status indicator - shows connection state -->
+          <div id="proctorStatusBox" style="position: absolute; bottom: 8px; left: 8px; right: 8px; background: rgba(255, 243, 205, 0.95); border-radius: 4px; padding: 6px 8px; font-size: 11px; color: #856404; text-align: center; font-weight: 600;">
+            ⏳ Connecting...
           </div>
         </div>
       </div>
@@ -236,20 +236,19 @@
           <span class="btn-icon">🎤</span>
           <span>Request Intervention</span>
         </button>
-        <button class="btn-continue" id="continueBtn" onclick="continueToNext()" style="display: none;">
+        <button class="btn-continue" id="continueBtn" onclick="continueToNext()" disabled style="opacity: 0.4;">
           <span class="btn-icon">→</span>
-          <span>Continue to Next Segment</span>
+          <span id="continueButtonText">Continue to Next Segment</span>
         </button>
       </div>
 
-      <div class="intervention-stats">
-        <div class="stat-card">
-          <div class="stat-label">Interventions Used</div>
-          <div class="stat-value"><span id="interventionCount">0</span>/10</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Repetitions Remaining</div>
-          <div class="stat-value" id="repetitionsRemaining">5</div>
+      <div class="intervention-stats" style="display: flex; justify-content: center; align-items: center; margin: 20px 0;">
+        <div class="stat-card" style="min-width: 250px; text-align: center;">
+          <div class="stat-label">Interventions Remaining</div>
+          <div class="stat-value" id="interventionsRemaining">10</div>
+          <div style="font-size: 12px; color: #888; margin-top: 8px;">
+            (First 5 are penalty-free)
+          </div>
         </div>
       </div>
 
@@ -281,7 +280,7 @@
     <div class="intervention-content">
       <div id="interventionStep1">
         <h2>🔴 Recording Intervention</h2>
-        <p>State your intervention protocol clearly in both languages.</p>
+        <p>State your intervention request clearly.</p>
         <div class="loading-spinner"></div>
         <p id="interventionTimer" style="margin-top: 20px; font-size: 18px; color: #666;">15 seconds</p>
         <button onclick="finishIntervention()">Finish Speaking</button>
@@ -292,7 +291,6 @@
         <div class="intervention-actions">
           <button onclick="selectInterventionAction('repeat')">
             🔁 Repeat Last Segment
-            <br><small>(Repetitions: <span id="repeatCount">5</span> remaining)</small>
           </button>
           <button onclick="selectInterventionAction('research')">
             📚 Pause to Research
@@ -321,6 +319,146 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.11.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.11.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection@1.0.2"></script>
+
+  <!-- Socket.io for live monitoring -->
+  <script src="/socket.io/socket.io.js"></script>
+
+  <!-- Pre-Session Overlay (Blocks test start until completed) -->
+  <div id="preSessionOverlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.95); z-index: 9999; align-items: center; justify-content: center;">
+    <div style="text-align: center; max-width: 600px; padding: 40px;">
+      <h1 style="color: white; font-size: 42px; margin-bottom: 30px;">Before Test Begins</h1>
+      <p style="color: #ccc; font-size: 20px; margin-bottom: 50px; line-height: 1.6;">
+        You must complete your pre-session preparation before the test can start.
+      </p>
+      <button onclick="startMandatoryPreSession()" style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); color: white; border: none; padding: 25px 60px; border-radius: 12px; font-size: 24px; font-weight: bold; cursor: pointer; box-shadow: 0 8px 20px rgba(0, 137, 123, 0.4); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+        🧘 Give Pre-Session
+      </button>
+    </div>
+  </div>
+
+  <!-- Pre-Session Modal -->
+  <div id="preSessionModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 10000; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 40px; border-radius: 16px; max-width: 600px; text-align: center;">
+      <h2 id="preSessionTitle" style="margin-top: 0; color: #333;">Pre-Session Preparation</h2>
+      <p id="preSessionDescription" style="font-size: 18px; color: #666; margin: 20px 0;">
+        Please perform both <strong>pre-session for patient and provider</strong> now.
+      </p>
+
+      <div style="background: #f5f5f5; padding: 30px; border-radius: 12px; margin: 30px 0;">
+        <div style="font-size: 16px; color: #666; margin-bottom: 10px;">Time Remaining</div>
+        <div id="preSessionTimerDisplay" style="font-size: 72px; font-weight: bold; color: #00897b;">1:00</div>
+        <div style="font-size: 14px; color: #888; margin-top: 10px;">Timer will end automatically</div>
+      </div>
+
+      <button onclick="finishPreSession()" style="background: #4caf50; color: white; border: none; padding: 15px 40px; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer;">
+        ✓ I'm Ready to Begin
+      </button>
+    </div>
+  </div>
+
+  <!-- Countdown Modal -->
+  <div id="countdownModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 10001; align-items: center; justify-content: center;">
+    <div style="text-align: center;">
+      <h2 style="color: white; font-size: 36px; margin-bottom: 30px;">Begin Interpretation</h2>
+      <div id="countdownNumber" style="font-size: 120px; font-weight: bold; color: #4caf50;">3</div>
+    </div>
+  </div>
+
+  <!-- Warmup Completion Modal -->
+  <div id="warmupCompletionModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 10001; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 50px; border-radius: 16px; max-width: 700px; text-align: center;">
+      <h2 style="margin-top: 0; color: #4caf50; font-size: 32px;">✓ Practice Warmup Complete!</h2>
+      <p style="font-size: 18px; color: #666; margin: 25px 0;">
+        Great job! The warmup was just for practice and is <strong>not graded</strong>.
+      </p>
+
+      <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 20px; border-radius: 8px; margin: 30px 0; text-align: left;">
+        <p style="margin: 0; font-size: 16px; color: #856404;">
+          <strong>⚠️ Next:</strong> You'll start the <strong>actual graded test</strong>. Your interventions will reset to 10.
+        </p>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 15px;">
+        <button onclick="replayInstructions()" style="background: #6c757d; color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+          🔄 Replay Instructions
+        </button>
+        <button onclick="redoWarmup()" style="background: #6c757d; color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+          🏃 Redo Warmup
+        </button>
+        <button onclick="startActualTest()" style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; border: none; padding: 25px 40px; border-radius: 10px; font-size: 22px; font-weight: bold; cursor: pointer; transition: transform 0.2s; box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+          ▶️ I'm Ready - Start GRADED Test Now
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Screen Share Instructions Modal -->
+  <div id="screenShareInstructionsModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.95); z-index: 10001; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 40px; border-radius: 16px; max-width: 700px; text-align: center;">
+      <div style="font-size: 64px; margin-bottom: 20px;">🖥️</div>
+      <h2 style="margin-top: 0; color: #333; font-size: 28px;">Screen Sharing Required</h2>
+      <p style="font-size: 18px; color: #666; margin: 20px 0;">
+        You must share your <strong>entire screen</strong> for test security.
+      </p>
+
+      <div style="background: #f8f9fa; border-radius: 12px; padding: 30px; margin: 30px 0; text-align: left;">
+        <h3 style="margin-top: 0; color: #333; font-size: 20px;">📋 When the popup appears:</h3>
+        <ol style="font-size: 16px; color: #555; line-height: 1.8; padding-left: 20px;">
+          <li><strong>Click "Entire Screen"</strong> at the top (NOT "Window" or "Tab")</li>
+          <li>Select your main monitor from the preview</li>
+          <li>Click the blue <strong>"Share"</strong> button</li>
+        </ol>
+
+        <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; border-radius: 8px; margin-top: 20px;">
+          <p style="margin: 0; font-size: 14px; color: #856404;">
+            ⚠️ <strong>Important:</strong> You must select "Entire Screen" - sharing just a window or tab is not allowed for security reasons.
+          </p>
+        </div>
+      </div>
+
+      <button id="screenShareContinueBtn" onclick="continueToScreenShare()" style="background: linear-gradient(135deg, #4caf50 0%, #45a049 100%); color: white; border: none; padding: 20px 40px; border-radius: 10px; font-size: 20px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);">
+        ✓ I Understand - Show Screen Share Prompt
+      </button>
+    </div>
+  </div>
+
+  <!-- Upload Progress Modal -->
+  <div id="uploadProgressModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.95); z-index: 10002; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 50px; border-radius: 16px; max-width: 600px; text-align: center; min-width: 500px;">
+      <div style="font-size: 64px; margin-bottom: 20px;">⏳</div>
+      <h2 style="margin-top: 0; color: #333; font-size: 28px;">Uploading Your Recording...</h2>
+      <p style="font-size: 18px; color: #666; margin: 20px 0;">
+        Please wait while we securely save your test recording.
+      </p>
+
+      <div style="background: #f8f9fa; border-radius: 12px; padding: 30px; margin: 30px 0;">
+        <!-- Progress Bar -->
+        <div style="background: #e9ecef; border-radius: 8px; height: 30px; overflow: hidden; margin-bottom: 15px;">
+          <div id="uploadProgressBar" style="background: linear-gradient(90deg, #4caf50 0%, #45a049 100%); height: 100%; width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px;">
+            <span id="uploadProgressText">0%</span>
+          </div>
+        </div>
+
+        <!-- Status Text -->
+        <p id="uploadStatusText" style="font-size: 16px; color: #666; margin: 0;">
+          Preparing upload...
+        </p>
+      </div>
+
+      <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 20px; border-radius: 8px; text-align: left;">
+        <p style="margin: 0; font-size: 14px; color: #856404;">
+          <strong>⚠️ DO NOT close this window or navigate away!</strong><br>
+          Your recording is being uploaded. Closing now may result in data loss.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Simple-peer for WebRTC -->
+  <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+
+  <!-- Error logging utility (MUST load before other scripts) -->
+  <script src="/js/error-logger.js"></script>
 
   <script src="/js/recording.js"></script>
   <script src="/js/app.js"></script>

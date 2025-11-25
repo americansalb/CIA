@@ -30,11 +30,13 @@ module.exports = (req, res) => {
       });
     }
 
-    matchedSession.proctorDeviceConnected = true;
+    // NOTE: Don't set proctorDeviceConnected yet - wait for recording to actually start
+    // This prevents main device from thinking proctor is ready before user clicks checkmark
+    // Connection is confirmed in a separate endpoint after recording starts
 
     res.json({
       success: true,
-      message: 'Proctor device connected',
+      message: 'PIN verified - setup proctor camera',
       sessionId: matchedSessionId, // Return session ID for recording purposes
       studentInfo: {
         email: matchedSession.email,

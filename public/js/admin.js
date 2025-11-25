@@ -1,4 +1,5 @@
 // Admin panel script
+console.log('[Admin] admin.js script loaded at', new Date().toISOString());
 let adminEmail = null;
 let allRecordings = [];
 let filteredRecordings = [];
@@ -35,6 +36,10 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
 
       // Load tests
       await loadTests();
+
+      // Initialize live monitoring immediately on login
+      console.log('[Admin] Auto-initializing live monitoring on login');
+      initializeLiveMonitoring();
     } else {
       errorDiv.textContent = result.message;
       errorDiv.style.display = 'block';
@@ -112,10 +117,19 @@ function renderRecordings() {
 
 function createRecordingCard(recording) {
   const date = new Date(recording.uploadedAt).toLocaleString();
-  const duration = recording.duration ? formatDuration(recording.duration) : 'Unknown';
+  const duration = recording.duration ? (recording.duration === 'incomplete' ? 'Incomplete' : formatDuration(recording.duration)) : 'Unknown';
 
-  const statusClass = recording.status === 'pending_review' ? 'status-pending' : 'status-graded';
-  const statusText = recording.status === 'pending_review' ? 'Pending Review' : 'Graded';
+  let statusClass, statusText;
+  if (recording.status === 'incomplete') {
+    statusClass = 'status-incomplete';
+    statusText = '⚠️ Incomplete (Left Early)';
+  } else if (recording.status === 'pending_review') {
+    statusClass = 'status-pending';
+    statusText = 'Pending Review';
+  } else {
+    statusClass = 'status-graded';
+    statusText = 'Graded';
+  }
 
   const mainVideo = recording.videos.find(v => v.deviceType === 'main');
   const proctorVideo = recording.videos.find(v => v.deviceType === 'proctor');
@@ -161,8 +175,12 @@ function createRecordingCard(recording) {
       </div>
 
       <div class="video-links">
-        ${mainVideo ? `<a href="${mainVideo.webViewLink}" target="_blank" class="video-link">📹 Main Camera</a>` : ''}
-        ${proctorVideo ? `<a href="${proctorVideo.webViewLink}" target="_blank" class="video-link">📹 Proctor Camera</a>` : ''}
+        ${mainVideo ? `<button class="video-link" onclick="openVideoPlayer('${recording.sessionId}', 'main', '${recording.email}')">▶️ View Main Camera</button>` : ''}
+        ${proctorVideo ? `<button class="video-link" onclick="openVideoPlayer('${recording.sessionId}', 'proctor', '${recording.email}')">▶️ View Proctor Camera</button>` : ''}
+      </div>
+      <div class="video-links" style="margin-top: 10px;">
+        ${mainVideo ? `<a href="${mainVideo.webViewLink}" target="_blank" class="video-link" style="background: #6c757d; font-size: 13px; padding: 8px 16px;">📂 Main on Drive</a>` : ''}
+        ${proctorVideo ? `<a href="${proctorVideo.webViewLink}" target="_blank" class="video-link" style="background: #6c757d; font-size: 13px; padding: 8px 16px;">📂 Proctor on Drive</a>` : ''}
       </div>
 
       ${interventionsList}
@@ -244,3 +262,465 @@ function formatDuration(seconds) {
   const secs = seconds % 60;
   return `${mins}m ${secs}s`;
 }
+
+// ====================
+// VIDEO PLAYER
+// ====================
+
+let currentChunks = [];
+let currentChunkIndex = 0;
+let currentSession = null;
+let currentDevice = null;
+let videoElement = null;
+
+async function openVideoPlayer(sessionId, deviceType, studentEmail) {
+  currentSession = sessionId;
+  currentDevice = deviceType;
+  currentChunkIndex = 0;
+
+  const modal = document.getElementById('videoPlayerModal');
+  const title = document.getElementById('videoPlayerTitle');
+  const videoLoading = document.getElementById('videoLoading');
+  const chunkListContainer = document.getElementById('chunkListContainer');
+
+  videoElement = document.getElementById('chunkVideo');
+
+  title.textContent = `${studentEmail} - ${deviceType === 'main' ? 'Main' : 'Proctor'} Camera`;
+  modal.classList.add('active');
+  videoLoading.style.display = 'block';
+  videoElement.style.display = 'none';
+
+  try {
+    // Fetch chunks from server
+    const response = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
+    const result = await response.json();
+
+    if (result.success && result.chunks.length > 0) {
+      currentChunks = result.chunks;
+
+      // Update totals
+      document.getElementById('totalChunks').textContent = currentChunks.length;
+
+      // Build chunk list
+      chunkListContainer.innerHTML = currentChunks.map((chunk, index) => `
+        <div class="chunk-item ${index === 0 ? 'active' : ''}" id="chunk-item-${index}" onclick="jumpToChunk(${index})">
+          Chunk ${chunk.chunkNumber}
+          <div style="font-size: 11px; color: #888;">Click to play</div>
+        </div>
+      `).join('');
+
+      // Play first chunk
+      await playChunk(0);
+    } else {
+      videoLoading.textContent = 'No chunks found for this recording';
+    }
+  } catch (error) {
+    console.error('Error loading chunks:', error);
+    videoLoading.textContent = 'Error loading video chunks';
+  }
+}
+
+async function playChunk(index) {
+  if (index < 0 || index >= currentChunks.length) return;
+
+  currentChunkIndex = index;
+  const chunk = currentChunks[index];
+
+  const videoLoading = document.getElementById('videoLoading');
+  const currentChunkNum = document.getElementById('currentChunkNum');
+  const prevBtn = document.getElementById('prevChunkBtn');
+  const nextBtn = document.getElementById('nextChunkBtn');
+
+  // Update UI
+  currentChunkNum.textContent = index + 1;
+  prevBtn.disabled = index === 0;
+  nextBtn.disabled = index === currentChunks.length - 1;
+
+  // Update chunk list
+  document.querySelectorAll('.chunk-item').forEach((item, i) => {
+    item.classList.toggle('active', i === index);
+    if (i <= index) item.classList.add('loaded');
+  });
+
+  // Load video
+  videoLoading.style.display = 'block';
+  videoLoading.textContent = `Loading chunk ${index + 1}...`;
+  videoElement.style.display = 'none';
+
+  try {
+    // Set video source
+    videoElement.src = chunk.downloadUrl;
+    videoElement.load();
+
+    // Wait for video to be ready
+    await new Promise((resolve, reject) => {
+      videoElement.onloadeddata = resolve;
+      videoElement.onerror = reject;
+    });
+
+    videoLoading.style.display = 'none';
+    videoElement.style.display = 'block';
+    videoElement.play();
+
+    // Auto-play next chunk when this one ends
+    videoElement.onended = () => {
+      if (currentChunkIndex < currentChunks.length - 1) {
+        playNextChunk();
+      }
+    };
+  } catch (error) {
+    console.error('Error playing chunk:', error);
+    videoLoading.textContent = `Error loading chunk ${index + 1}`;
+  }
+}
+
+function playNextChunk() {
+  if (currentChunkIndex < currentChunks.length - 1) {
+    playChunk(currentChunkIndex + 1);
+  }
+}
+
+function playPreviousChunk() {
+  if (currentChunkIndex > 0) {
+    playChunk(currentChunkIndex - 1);
+  }
+}
+
+function jumpToChunk(index) {
+  playChunk(index);
+}
+
+function closeVideoPlayer() {
+  const modal = document.getElementById('videoPlayerModal');
+  modal.classList.remove('active');
+
+  // Stop video
+  if (videoElement) {
+    videoElement.pause();
+    videoElement.src = '';
+  }
+
+  currentChunks = [];
+  currentChunkIndex = 0;
+  currentSession = null;
+  currentDevice = null;
+}
+
+
+// ==================== LIVE MONITORING WITH WEBRTC ====================
+
+let adminSocket = null;
+let activeSessions = [];
+let monitoringPeers = new Map(); // sessionId -> peer object
+let currentlyMonitoring = null;
+
+console.log('[Admin] Defining switchTab function');
+
+function switchTab(tabName, event) {
+  console.log('[Admin] switchTab called:', tabName);
+
+  // Hide all tabs
+  document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+
+  // Show selected tab
+  if (tabName === 'live') {
+    console.log('[Admin] Switching to live monitoring tab');
+    document.getElementById('liveTab').classList.add('active');
+    if (event) event.target.classList.add('active');
+    initializeLiveMonitoring();
+  } else if (tabName === 'recordings') {
+    document.getElementById('recordingsTab').classList.add('active');
+    if (event) event.target.classList.add('active');
+  } else if (tabName === 'tests') {
+    document.getElementById('testsTab').classList.add('active');
+    if (event) event.target.classList.add('active');
+  }
+}
+
+function initializeLiveMonitoring() {
+  console.log('[Admin] initializeLiveMonitoring() called');
+  console.log('[Admin] Socket.io available?', typeof io !== 'undefined');
+  console.log('[Admin] adminSocket exists?', !!adminSocket);
+  console.log('[Admin] adminEmail:', adminEmail);
+
+  if (adminSocket && adminSocket.connected) {
+    console.log('[Admin] Already connected to live monitoring');
+    return;
+  }
+
+  if (typeof io === 'undefined') {
+    console.error('[Admin] Socket.io library not loaded!');
+    return;
+  }
+
+  console.log('[Admin] Initializing live monitoring...');
+
+  // Connect to Socket.io
+  adminSocket = io();
+
+  adminSocket.on('connect', () => {
+    console.log('Admin Socket.io connected:', adminSocket.id);
+
+    // Join as admin
+    adminSocket.emit('join-session', {
+      sessionId: 'admin',
+      email: adminEmail,
+      role: 'admin',
+    });
+  });
+
+  // Receive list of active sessions
+  adminSocket.on('active-sessions', (sessions) => {
+    console.log('Active sessions updated:', sessions);
+    activeSessions = sessions;
+    renderActiveSessions();
+  });
+
+  // Receive session progress updates
+  adminSocket.on('session-progress', (update) => {
+    console.log('Session progress:', update);
+    updateSessionProgress(update);
+  });
+
+  // Receive WebRTC signals from students
+  adminSocket.on('signal', ({ fromSocketId, signal, deviceType, sessionId, email }) => {
+    console.log('Received signal from student:', sessionId, deviceType);
+
+    // Create peer to receive stream if we're monitoring this student
+    if (currentlyMonitoring && currentlyMonitoring.sessionId === sessionId) {
+      handleStudentSignal(fromSocketId, signal, deviceType, sessionId, email);
+    }
+  });
+
+  adminSocket.on('disconnect', () => {
+    console.log('Admin Socket.io disconnected');
+  });
+}
+
+function renderActiveSessions() {
+  const container = document.getElementById('activeSessionsContainer');
+
+  if (activeSessions.length === 0) {
+    container.innerHTML = `
+      <div style="grid-column: 1/-1; text-align: center; padding: 60px; color: #999;">
+        <div style="font-size: 64px; margin-bottom: 20px;">📺</div>
+        <p style="font-size: 18px; margin: 0;">No active tests at the moment</p>
+        <p style="font-size: 14px; margin-top: 10px;">Students will appear here when they start their tests</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = activeSessions.map(session => createSessionCard(session)).join('');
+}
+
+function createSessionCard(session) {
+  const elapsed = session.elapsedTime || 0;
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+  const timeStr = minutes + ':' + String(seconds).padStart(2, '0');
+
+  return `
+    <div class="recording-card" style="position: relative;">
+      <div class="recording-header">
+        <div>
+          <h2 style="margin: 0; color: #333;">${session.email}</h2>
+          <p style="margin: 5px 0 0 0; color: #666;">Session: ${session.sessionId.substring(0, 8)}...</p>
+        </div>
+        <span style="padding: 6px 12px; background: #4caf50; color: white; border-radius: 20px; font-size: 14px; font-weight: 600;">
+          🔴 LIVE
+        </span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 15px 0;">
+        <div style="text-align: center; padding: 10px; background: #f5f5f5; border-radius: 6px;">
+          <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Segment</div>
+          <div style="font-size: 20px; font-weight: 600; color: #333;">${session.currentSegment || 0}/${session.totalSegments || 0}</div>
+        </div>
+        <div style="text-align: center; padding: 10px; background: #f5f5f5; border-radius: 6px;">
+          <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Elapsed</div>
+          <div style="font-size: 20px; font-weight: 600; color: #333;">${timeStr}</div>
+        </div>
+      </div>
+
+      <button onclick="monitorStudent('${session.sessionId}', '${session.email}')" style="width: 100%; padding: 12px; background: #667eea; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; cursor: pointer; transition: transform 0.2s;">
+        📹 Monitor Live Stream
+      </button>
+    </div>
+  `;
+}
+
+function updateSessionProgress(update) {
+  const session = activeSessions.find(s => s.sessionId === update.sessionId);
+  if (session) {
+    session.currentSegment = update.currentSegment;
+    session.totalSegments = update.totalSegments;
+    session.elapsedTime = update.elapsedTime;
+    renderActiveSessions();
+
+    // Update modal if currently monitoring this session
+    if (currentlyMonitoring && currentlyMonitoring.sessionId === update.sessionId) {
+      updateLiveSessionInfo(update);
+    }
+  }
+}
+
+function monitorStudent(sessionId, email) {
+  console.log('Starting to monitor student:', sessionId, email);
+
+  currentlyMonitoring = { sessionId, email };
+
+  // Show modal
+  const modal = document.getElementById('liveStreamModal');
+  const title = document.getElementById('liveStreamTitle');
+
+  title.textContent = `Live Monitoring - ${email}`;
+  modal.classList.add('active');
+
+  // Request to monitor this student
+  adminSocket.emit('monitor-student', { sessionId });
+
+  // Show session info
+  const session = activeSessions.find(s => s.sessionId === sessionId);
+  if (session) {
+    updateLiveSessionInfo(session);
+  }
+}
+
+function handleStudentSignal(fromSocketId, signal, deviceType, sessionId, email) {
+  console.log('Handling student signal for device:', deviceType);
+
+  // Create peer to receive stream (admin is not initiator)
+  const peer = new SimplePeer({
+    initiator: false,
+    trickle: false,
+  });
+
+  // Handle incoming stream
+  peer.on('stream', (stream) => {
+    console.log('Received stream from student:', deviceType);
+
+    // Display stream in appropriate video element
+    if (deviceType === 'main') {
+      const videoElement = document.getElementById('liveMainCamera');
+      videoElement.srcObject = stream;
+
+      // Update status indicator
+      const statusElement = document.getElementById('mainCameraStatus');
+      if (statusElement) {
+        statusElement.textContent = '✓ Connected';
+        statusElement.style.color = '#4caf50';
+      }
+    } else if (deviceType === 'proctor') {
+      const videoElement = document.getElementById('liveProctorCamera');
+      videoElement.srcObject = stream;
+
+      // Update status indicator
+      const statusElement = document.getElementById('proctorCameraStatus');
+      if (statusElement) {
+        statusElement.textContent = '✓ Connected';
+        statusElement.style.color = '#4caf50';
+      }
+    }
+  });
+
+  peer.on('error', (err) => {
+    console.error('WebRTC peer error for', deviceType + ':', err);
+  });
+
+  // Send signal back to student/proctor
+  peer.on('signal', (answerSignal) => {
+    console.log('Sending answer signal to', deviceType);
+    adminSocket.emit('signal', {
+      sessionId: sessionId,
+      targetSocketId: fromSocketId,
+      signal: answerSignal,
+      deviceType: deviceType,
+    });
+  });
+
+  // Process student's signal
+  peer.signal(signal);
+
+  // Store peer
+  monitoringPeers.set(sessionId + '_' + deviceType, peer);
+}
+
+function updateLiveSessionInfo(session) {
+  const container = document.getElementById('liveSessionInfo');
+  const elapsed = session.elapsedTime || 0;
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+  const timeStr = minutes + ':' + String(seconds).padStart(2, '0');
+
+  container.innerHTML = `
+    <div style="margin-bottom: 15px;">
+      <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Email</div>
+      <div style="font-size: 14px; font-weight: 600; color: #333;">${session.email}</div>
+    </div>
+    <div style="margin-bottom: 15px;">
+      <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Current Segment</div>
+      <div style="font-size: 14px; font-weight: 600; color: #333;">${session.currentSegment || 0} of ${session.totalSegments || 0}</div>
+    </div>
+    <div style="margin-bottom: 15px;">
+      <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Elapsed Time</div>
+      <div style="font-size: 14px; font-weight: 600; color: #333;">${timeStr}</div>
+    </div>
+    <div style="margin-bottom: 15px;">
+      <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Session ID</div>
+      <div style="font-size: 12px; font-family: monospace; color: #333;">${session.sessionId}</div>
+    </div>
+  `;
+}
+
+function closeLiveStream() {
+  const modal = document.getElementById('liveStreamModal');
+  modal.classList.remove('active');
+
+  // Stop all peer connections
+  if (currentlyMonitoring) {
+    const mainPeerKey = currentlyMonitoring.sessionId + '_main';
+    const proctorPeerKey = currentlyMonitoring.sessionId + '_proctor';
+
+    const mainPeer = monitoringPeers.get(mainPeerKey);
+    if (mainPeer) {
+      mainPeer.destroy();
+      monitoringPeers.delete(mainPeerKey);
+    }
+
+    const proctorPeer = monitoringPeers.get(proctorPeerKey);
+    if (proctorPeer) {
+      proctorPeer.destroy();
+      monitoringPeers.delete(proctorPeerKey);
+    }
+  }
+
+  // Clear videos
+  const mainVideo = document.getElementById('liveMainCamera');
+  const proctorVideo = document.getElementById('liveProctorCamera');
+  mainVideo.srcObject = null;
+  proctorVideo.srcObject = null;
+
+  // Reset status indicators
+  const mainStatus = document.getElementById('mainCameraStatus');
+  const proctorStatus = document.getElementById('proctorCameraStatus');
+  if (mainStatus) {
+    mainStatus.textContent = 'Connecting...';
+    mainStatus.style.color = '#ffa500';
+  }
+  if (proctorStatus) {
+    proctorStatus.textContent = 'Connecting...';
+    proctorStatus.style.color = '#ffa500';
+  }
+
+  currentlyMonitoring = null;
+}
+
+// Ensure switchTab is globally accessible
+window.switchTab = switchTab;
+
+// Verification log at end of script
+console.log('[Admin] Script fully loaded');
+console.log('[Admin] switchTab function exists?', typeof switchTab !== 'undefined');
+console.log('[Admin] window.switchTab exists?', typeof window.switchTab !== 'undefined');

@@ -10,6 +10,8 @@ module.exports = async (req, res) => {
       q: `'${mainFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
       fields: 'files(id, name, createdTime)',
       orderBy: 'createdTime desc',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     });
 
     const recordings = [];
@@ -20,6 +22,8 @@ module.exports = async (req, res) => {
         q: `'${studentFolder.id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
         fields: 'files(id, name, createdTime)',
         orderBy: 'createdTime desc',
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
 
       // For each session, get metadata and videos
@@ -27,17 +31,21 @@ module.exports = async (req, res) => {
         const filesResponse = await drive.files.list({
           q: `'${sessionFolder.id}' in parents and trashed=false`,
           fields: 'files(id, name, createdTime, webViewLink, mimeType)',
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
         });
 
         const files = filesResponse.data.files || [];
         const metadataFile = files.find(f => f.name.endsWith('_metadata.json'));
-        const videoFiles = files.filter(f => f.name.includes('_FINAL_') && f.mimeType === 'video/webm');
+        const videoFiles = files.filter(f => f.name.includes('_FINAL_') && (f.mimeType === 'video/webm' || f.mimeType === 'video/mp4'));
+        const chunkFiles = files.filter(f => f.name.includes('_chunk_'));
 
         if (metadataFile) {
-          // Download metadata
+          // Complete recording with metadata
           const metadataResponse = await drive.files.get({
             fileId: metadataFile.id,
             alt: 'media',
+            supportsAllDrives: true,
           });
 
           const metadata = metadataResponse.data;
@@ -52,6 +60,55 @@ module.exports = async (req, res) => {
               webViewLink: v.webViewLink,
               deviceType: v.name.includes('_main_') ? 'main' : 'proctor',
             })),
+          });
+        } else if (chunkFiles.length > 0) {
+          // Incomplete recording - student left prematurely, but chunks were uploaded
+          // Parse info from folder structure: studentFolder format is "email_studentId"
+          const folderParts = studentFolder.name.split('_');
+          const email = folderParts.slice(0, -1).join('_'); // Everything except last part
+          const studentId = folderParts[folderParts.length - 1]; // Last part
+
+          // Count chunks by device type
+          const mainChunks = chunkFiles.filter(f => f.name.includes('main_chunk_'));
+          const proctorChunks = chunkFiles.filter(f => f.name.includes('proctor_chunk_'));
+
+          // Get first chunk upload time as proxy for session start
+          const earliestChunk = chunkFiles.sort((a, b) =>
+            new Date(a.createdTime) - new Date(b.createdTime)
+          )[0];
+
+          // Create synthetic metadata for incomplete session
+          recordings.push({
+            sessionId: sessionFolder.name,
+            email: email,
+            studentId: studentId,
+            permittedTest: 'Unknown',
+            duration: 'incomplete',
+            interventionCount: 0,
+            interventions: [],
+            uploadedAt: earliestChunk ? earliestChunk.createdTime : sessionFolder.createdTime,
+            status: 'incomplete',
+            studentFolder: studentFolder.name,
+            sessionFolder: sessionFolder.name,
+            chunkCount: {
+              main: mainChunks.length,
+              proctor: proctorChunks.length,
+            },
+            videos: [
+              // Mark as having chunks available for viewing
+              ...(mainChunks.length > 0 ? [{
+                fileId: 'chunks',
+                fileName: `${mainChunks.length} chunks`,
+                webViewLink: null,
+                deviceType: 'main',
+              }] : []),
+              ...(proctorChunks.length > 0 ? [{
+                fileId: 'chunks',
+                fileName: `${proctorChunks.length} chunks`,
+                webViewLink: null,
+                deviceType: 'proctor',
+              }] : []),
+            ],
           });
         }
       }

@@ -144,7 +144,7 @@ async function getAllTests() {
 async function getTestConfig(testName) {
   try {
     const sheets = await getSheets();
-    const range = process.env.TESTS_SHEET_RANGE || 'Tests!A:D';
+    const range = process.env.TESTS_SHEET_RANGE || 'Tests!A:F';
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
@@ -153,23 +153,85 @@ async function getTestConfig(testName) {
 
     const rows = response.data.values || [];
     const segments = [];
+    let instructionsAudioUrl = '';
+    let warmupAudioUrl = '';
+
+    // ALSO load universal instructions and warmup from _UNIVERSAL_INSTRUCTIONS
+    let universalInstructionsUrl = '';
+    let universalWarmupSegments = [];
 
     for (let i = 1; i < rows.length; i++) {
-      const [name, segmentNum, audioUrl, status] = rows[i];
+      const [name, segmentNum, audioUrl, status, instructions, warmup] = rows[i];
+
+      // Load universal instructions and warmup
+      if (name === '_UNIVERSAL_INSTRUCTIONS' && status === 'active') {
+        if (!universalInstructionsUrl && audioUrl) {
+          universalInstructionsUrl = audioUrl;
+        }
+        if (warmup) {
+          try {
+            const parsed = JSON.parse(warmup);
+            if (Array.isArray(parsed)) {
+              universalWarmupSegments = parsed;
+            }
+          } catch (e) {
+            // Not JSON, treat as single URL
+            if (warmup.trim()) {
+              universalWarmupSegments = [warmup];
+            }
+          }
+        }
+      }
+
+      // Load test segments
       if (name === testName && status === 'active') {
         segments.push({
           segmentNumber: parseInt(segmentNum),
           audioUrl,
         });
+        // Read instructions and warmup URLs from test row (for backward compatibility)
+        if (!instructionsAudioUrl && instructions) {
+          instructionsAudioUrl = instructions;
+        }
+        if (!warmupAudioUrl && warmup) {
+          warmupAudioUrl = warmup;
+        }
       }
     }
 
     // Sort by segment number
     segments.sort((a, b) => a.segmentNumber - b.segmentNumber);
 
+    // Parse warmup segments from test row (backward compatibility)
+    let warmupSegments = [];
+    if (warmupAudioUrl) {
+      try {
+        // Try to parse as JSON array
+        const parsed = JSON.parse(warmupAudioUrl);
+        if (Array.isArray(parsed)) {
+          warmupSegments = parsed;
+          warmupAudioUrl = ''; // Clear single URL if we have segments
+        }
+      } catch (e) {
+        // Not JSON, treat as single URL (backward compatibility)
+        warmupSegments = [];
+      }
+    }
+
+    // PRIORITY: Universal instructions/warmup override test-specific ones
+    const finalInstructionsUrl = universalInstructionsUrl || instructionsAudioUrl;
+    const finalWarmupSegments = universalWarmupSegments.length > 0 ? universalWarmupSegments : warmupSegments;
+    const finalWarmupUrl = finalWarmupSegments.length === 0 ? warmupAudioUrl : '';
+
+    console.log(`getTestConfig(${testName}): Found ${finalWarmupSegments.length} warmup segments from universal instructions`);
+
     return {
       testName,
       segments: segments.map(s => s.audioUrl),
+      instructionsAudioUrl: finalInstructionsUrl || '',
+      warmupAudioUrl: finalWarmupUrl || '',
+      warmupSegments: finalWarmupSegments,
+      universalInstructionsUrl: finalInstructionsUrl || '',
     };
   } catch (error) {
     console.error('Error getting test config:', error);
@@ -177,10 +239,10 @@ async function getTestConfig(testName) {
   }
 }
 
-async function saveTestSegments(testName, segments) {
+async function saveTestSegments(testName, segments, instructionsAudioUrl = '', warmupAudioUrl = '', warmupSegments = []) {
   try {
     const sheets = await getSheets();
-    const range = process.env.TESTS_SHEET_RANGE || 'Tests!A:D';
+    const range = process.env.TESTS_SHEET_RANGE || 'Tests!A:F';
 
     // First, get existing data to preserve other tests
     let existingRows = [];
@@ -197,7 +259,7 @@ async function saveTestSegments(testName, segments) {
 
     // Ensure headers exist (if sheet is empty or doesn't have headers)
     if (existingRows.length === 0) {
-      existingRows = [['Test_Name', 'Segment_Number', 'Audio_URL', 'Status']];
+      existingRows = [['Test_Name', 'Segment_Number', 'Audio_URL', 'Status', 'Instructions_Audio_URL', 'Warmup_Audio_URL']];
     }
 
     // Remove old entries for this test
@@ -206,15 +268,36 @@ async function saveTestSegments(testName, segments) {
       return row[0] !== testName;
     });
 
+    // If warmup segments provided, store as JSON array
+    let warmupValue = warmupAudioUrl || '';
+    if (warmupSegments && warmupSegments.length > 0) {
+      warmupValue = JSON.stringify(warmupSegments);
+    }
+
     // Add new segments
-    segments.forEach((url, index) => {
+    if (segments.length > 0) {
+      segments.forEach((url, index) => {
+        filteredRows.push([
+          testName,
+          (index + 1).toString(),
+          url,
+          'active',
+          instructionsAudioUrl || '',
+          warmupValue,
+        ]);
+      });
+    } else if (warmupSegments.length > 0 || instructionsAudioUrl) {
+      // If there are only warmup segments or instructions with no test segments,
+      // still create a row to store them in the database
       filteredRows.push([
         testName,
-        (index + 1).toString(),
-        url,
+        '1',
+        instructionsAudioUrl || '',
         'active',
+        '',
+        warmupValue,
       ]);
-    });
+    }
 
     // Write back to sheet
     await sheets.spreadsheets.values.update({

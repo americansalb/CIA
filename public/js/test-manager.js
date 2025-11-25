@@ -38,21 +38,26 @@ function renderTests(tests) {
   const container = document.getElementById('testsContainer');
 
   const header = `
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-      <div>
-        <h3 style="margin: 0;">Test Library</h3>
-        <p style="color: #666; margin: 5px 0 0 0; font-size: 14px;">Configure tests and universal instructions</p>
-      </div>
-      <button onclick="createNewTest()" style="background: #28a745;">+ Create New Test</button>
-    </div>
-    <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; cursor: pointer;" onclick="editUniversalInstructions()">
+    <!-- Universal Settings Section - Prominent at Top -->
+    <div style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); padding: 30px; border-radius: 12px; margin-bottom: 30px; color: white; box-shadow: 0 4px 12px rgba(0, 137, 123, 0.3);">
       <div style="display: flex; justify-content: space-between; align-items: center;">
         <div>
-          <strong style="color: #1976d2;">📹 Universal Instructions</strong>
-          <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Instructions shown to all students before every test</p>
+          <h2 style="margin: 0 0 10px 0; color: white; font-size: 24px;">⚙️ Universal Settings</h2>
+          <p style="margin: 0; opacity: 0.9; font-size: 15px;">Configure instructions and warmup that apply to ALL tests</p>
         </div>
-        <span style="color: #1976d2;">Configure →</span>
+        <button onclick="editUniversalInstructions()" style="background: white; color: #00897b; padding: 15px 30px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
+          📹 Edit Instructions & Warmup
+        </button>
       </div>
+    </div>
+
+    <!-- Tests Section -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <div>
+        <h3 style="margin: 0;">Individual Tests</h3>
+        <p style="color: #666; margin: 5px 0 0 0; font-size: 14px;">Configure test-specific audio segments</p>
+      </div>
+      <button onclick="createNewTest()" style="background: #00897b; color: white;">+ Create New Test</button>
     </div>
   `;
 
@@ -105,6 +110,15 @@ function renderTestEditor() {
     <div class="test-editor">
       <h2>${currentTest}</h2>
       <p style="color: #666; margin-bottom: 20px;">Configure audio segments for this test. You can fetch a full audio from Bunny.net and split it visually, or add segment URLs manually.</p>
+
+      <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #2196f3;">
+        <p style="margin: 0; color: #1565c0; font-size: 14px;">
+          <strong>ℹ️ Note:</strong> Instructions and warmup audio are configured in Universal Instructions (editable from the main test library page)
+        </p>
+      </div>
+
+      <h3>🎯 Test Segments (Required)</h3>
+      <p style="color: #666; margin-bottom: 15px;">These are the actual graded test segments</p>
 
       <div style="display: flex; gap: 10px; margin-bottom: 20px;">
         <button class="upload-split-btn" onclick="openAudioSplitter()">🎵 Fetch & Split from Bunny.net</button>
@@ -174,13 +188,15 @@ async function saveTest() {
   }
 
   try {
+    const config = {
+      testName: currentTest,
+      segments: validSegments,
+    };
+
     const response = await fetch('/api/save-test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        testName: currentTest,
-        segments: validSegments,
-      }),
+      body: JSON.stringify(config),
     });
 
     const result = await response.json();
@@ -219,24 +235,58 @@ function createNewTest() {
 }
 
 // Edit universal instructions
+let universalWarmupUrl = '';
+let warmupSegments = [];
+
 async function editUniversalInstructions() {
   currentTest = '_UNIVERSAL_INSTRUCTIONS';
-  
+
   // Load existing config if any
   try {
     const response = await fetch('/api/test-config?testName=' + encodeURIComponent('_UNIVERSAL_INSTRUCTIONS'));
     const result = await response.json();
-    
+
     if (result.success && result.config.segments.length > 0) {
       testSegments = result.config.segments;
+      universalWarmupUrl = result.config.warmupAudioUrl || '';
+      warmupSegments = result.config.warmupSegments || [];
+
+      // If no warmup segments, start with one empty field
+      if (warmupSegments.length === 0) {
+        warmupSegments = [''];
+      }
     } else {
       testSegments = [''];
+      universalWarmupUrl = '';
+      warmupSegments = [''];
     }
   } catch (error) {
     console.error('Error loading universal instructions:', error);
     testSegments = [''];
+    universalWarmupUrl = '';
+    warmupSegments = [''];
   }
 
+  renderUniversalInstructionsEditor();
+}
+
+// Add warmup segment
+function addWarmupSegment() {
+  warmupSegments.push('');
+  renderUniversalInstructionsEditor();
+}
+
+// Update warmup segment
+function updateWarmupSegment(index, value) {
+  warmupSegments[index] = value;
+}
+
+// Remove warmup segment
+function removeWarmupSegment(index) {
+  warmupSegments.splice(index, 1);
+  if (warmupSegments.length === 0) {
+    warmupSegments = [''];
+  }
   renderUniversalInstructionsEditor();
 }
 
@@ -244,37 +294,124 @@ async function editUniversalInstructions() {
 function renderUniversalInstructionsEditor() {
   const container = document.getElementById('testsContainer');
 
-  container.innerHTML = `
-    <div class="test-editor">
-      <h2>📹 Universal Instructions</h2>
-      <p style="color: #666; margin-bottom: 20px;">
-        Configure a video/audio file that will play for ALL students at the start of every test. 
-        This should contain general test-taking instructions, microphone check guidance, and camera setup information.
-      </p>
+  const hasInstructions = testSegments[0] && testSegments[0].trim();
+  const hasWarmup = universalWarmupUrl && universalWarmupUrl.trim();
 
-      <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-        <strong style="color: #856404;">💡 Tip:</strong>
-        <p style="margin: 5px 0 0 0; color: #856404; font-size: 14px;">
-          Record a video explaining: how to position cameras, how to use interventions, test rules, etc.
-          Students will see this BEFORE the proctor setup screen.
-        </p>
+  container.innerHTML = `
+    <div style="max-width: 900px; margin: 0 auto;">
+      <!-- Header -->
+      <div style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); padding: 30px; border-radius: 12px; margin-bottom: 30px; color: white;">
+        <h2 style="margin: 0 0 10px 0; color: white;">⚙️ Universal Settings</h2>
+        <p style="margin: 0; opacity: 0.9;">These settings apply to ALL tests. Students will see these BEFORE their individual test begins.</p>
       </div>
 
-      <div class="segment-list">
-        <div class="segment-item">
-          <span style="min-width: 150px; color: #666;">Instructions URL:</span>
-          <input 
-            type="text" 
-            value="${testSegments[0] || ''}" 
-            placeholder="https://your-cdn.b-cdn.net/universal-instructions.mp4"
-            onchange="testSegments[0] = this.value"
-          />
+      <!-- Test Flow Diagram -->
+      <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+        <h3 style="margin: 0 0 15px 0; color: #333;">📋 Student Flow</h3>
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; color: #666;">
+          <span style="background: white; padding: 8px 12px; border-radius: 6px;">1. Login</span>
+          <span>→</span>
+          <span style="background: white; padding: 8px 12px; border-radius: 6px;">2. Camera Setup</span>
+          <span>→</span>
+          <span style="background: white; padding: 8px 12px; border-radius: 6px;">3. Proctor Connection</span>
+          <span>→</span>
+          <span style="background: #e3f2fd; padding: 8px 12px; border-radius: 6px; font-weight: 600;">4. Instructions</span>
+          <span>→</span>
+          <span style="background: #e8f5e9; padding: 8px 12px; border-radius: 6px; font-weight: 600;">5. Warmup Choice</span>
+          <span>→</span>
+          <span style="background: white; padding: 8px 12px; border-radius: 6px;">6. Test</span>
         </div>
       </div>
 
-      <div style="margin-top: 30px;">
-        <button class="back-btn" onclick="loadTests()">← Back to Tests</button>
-        <button onclick="saveUniversalInstructions()">💾 Save Instructions</button>
+      <!-- Instructions Upload -->
+      <div style="background: white; padding: 30px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+          <div style="background: #e3f2fd; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+            📹
+          </div>
+          <div>
+            <h3 style="margin: 0; color: #1565c0;">Universal Instructions</h3>
+            <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Video or audio explaining test rules, camera positioning, and intervention usage</p>
+          </div>
+        </div>
+
+        <div style="background: #fafafa; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+          <label style="display: block; color: #333; font-weight: 600; margin-bottom: 8px;">
+            Upload URL (Bunny.net CDN or direct link)
+          </label>
+          <input
+            type="text"
+            value="${testSegments[0] || ''}"
+            placeholder="https://your-cdn.b-cdn.net/instructions.mp4"
+            style="width: 100%; padding: 12px; border: 2px solid ${hasInstructions ? '#00897b' : '#e0e0e0'}; border-radius: 8px; font-size: 15px; font-family: monospace;"
+            onchange="testSegments[0] = this.value"
+          />
+          ${hasInstructions ? '<p style="margin: 8px 0 0 0; color: #00897b; font-size: 13px;">✓ Instructions configured</p>' : '<p style="margin: 8px 0 0 0; color: #888; font-size: 13px;">Paste your video/audio URL above</p>'}
+        </div>
+
+        <div style="background: #fff3cd; padding: 12px; border-radius: 6px; border-left: 3px solid #ffc107;">
+          <p style="margin: 0; color: #856404; font-size: 13px;">
+            <strong>💡 Tip:</strong> Use MP4 for video or MP3 for audio. Students can skip after 5 seconds if they've seen it before.
+          </p>
+        </div>
+      </div>
+
+      <!-- Warmup Segments -->
+      <div style="background: white; padding: 30px; border-radius: 12px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+          <div style="background: #e8f5e9; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+            🏃
+          </div>
+          <div style="flex: 1;">
+            <h3 style="margin: 0; color: #2e7d32;">Warmup Segments (Optional)</h3>
+            <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Practice segments - same as test format, NOT graded</p>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+          <button onclick="openWarmupAudioSplitter()" style="background: #4caf50; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+            🎵 Fetch & Split from Bunny.net
+          </button>
+          <button onclick="addWarmupSegment()" style="background: #66bb6a; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+            + Add Segment URL Manually
+          </button>
+        </div>
+
+        <div id="warmupAudioSplitterContainer" style="display: none; margin-bottom: 20px;"></div>
+
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          ${warmupSegments.map((url, i) => `
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <span style="min-width: 100px; color: #666; font-weight: 600;">Segment ${i + 1}:</span>
+              <input
+                type="text"
+                value="${url}"
+                placeholder="https://your-cdn.b-cdn.net/warmup-segment-${i + 1}.mp3"
+                style="flex: 1; padding: 12px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px; font-family: monospace;"
+                onchange="updateWarmupSegment(${i}, this.value)"
+              />
+              <button onclick="removeWarmupSegment(${i})" style="background: #f44336; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">
+                Remove
+              </button>
+            </div>
+          `).join('')}
+        </div>
+
+        <div style="background: #e8f5e9; padding: 12px; border-radius: 6px; border-left: 3px solid #4caf50; margin-top: 15px;">
+          <p style="margin: 0; color: #2e7d32; font-size: 13px;">
+            <strong>ℹ️ Note:</strong> Warmup works EXACTLY like the test (segments, interventions, next buttons) - just shorter and not graded.
+          </p>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div style="display: flex; gap: 15px; justify-content: space-between;">
+        <button onclick="loadTests()" style="background: #757575; color: white; padding: 15px 30px; border: none; border-radius: 8px; font-size: 16px; cursor: pointer;">
+          ← Back to Test Library
+        </button>
+        <button onclick="saveUniversalInstructions()" style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); color: white; padding: 15px 40px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 12px rgba(0, 137, 123, 0.3);">
+          💾 Save Universal Settings
+        </button>
       </div>
     </div>
   `;
@@ -285,29 +422,47 @@ async function saveUniversalInstructions() {
   const url = testSegments[0]?.trim();
 
   if (!url) {
-    const confirmDelete = confirm('No URL provided. This will remove universal instructions. Continue?');
+    const confirmDelete = confirm('No instructions URL provided. This will remove universal instructions. Continue?');
     if (!confirmDelete) return;
   }
 
   if (url && !url.startsWith('http')) {
-    alert('URL must start with http:// or https://');
+    alert('Instructions URL must start with http:// or https://');
     return;
   }
 
+  // Validate warmup segments - filter out empty ones
+  const validWarmupSegments = warmupSegments.filter(s => s && s.trim());
+
+  // Validate each warmup segment URL
+  for (const segment of validWarmupSegments) {
+    if (!segment.startsWith('http')) {
+      alert('All warmup segment URLs must start with http:// or https://');
+      return;
+    }
+  }
+
   try {
+    const config = {
+      testName: '_UNIVERSAL_INSTRUCTIONS',
+      segments: url ? [url] : [],
+    };
+
+    // Add warmup segments if any valid ones exist
+    if (validWarmupSegments.length > 0) {
+      config.warmupSegments = validWarmupSegments;
+    }
+
     const response = await fetch('/api/save-test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        testName: '_UNIVERSAL_INSTRUCTIONS',
-        segments: url ? [url] : [],
-      }),
+      body: JSON.stringify(config),
     });
 
     const result = await response.json();
 
     if (result.success) {
-      alert('Universal instructions saved successfully!');
+      alert('Universal instructions & warmup saved successfully!');
       loadTests();
     } else {
       alert('Failed to save: ' + result.message);
@@ -328,16 +483,30 @@ let isPlaying = false;
 let currentAudioSource = null;
 let playbackStartTime = 0;
 let playbackOffset = 0;
+let isWarmupSplitter = false; // Track if we're splitting for warmup or test
+
+function openWarmupAudioSplitter() {
+  isWarmupSplitter = true;
+  const container = document.getElementById('warmupAudioSplitterContainer');
+  container.style.display = 'block';
+  renderAudioSplitterUI(container, 'warmup');
+}
 
 function openAudioSplitter() {
+  isWarmupSplitter = false;
   const container = document.getElementById('audioSplitterContainer');
   container.style.display = 'block';
+  renderAudioSplitterUI(container, 'test');
+}
+
+function renderAudioSplitterUI(container, type) {
+  const isWarmup = (type === 'warmup');
 
   container.innerHTML = `
     <div class="audio-splitter">
-      <h3>🎵 Fetch & Split Audio from Bunny.net</h3>
+      <h3>🎵 Fetch & Split ${isWarmup ? 'Warmup' : 'Test'} Audio from Bunny.net</h3>
       <p style="color: #666; margin-bottom: 15px;">
-        Paste the Bunny.net URL of your full audio file below. CIA will fetch it, show the waveform,
+        Paste the Bunny.net URL of your full ${isWarmup ? 'warmup' : 'test'} audio file below. CIA will fetch it, show the waveform,
         and let you visually split it into segments.
       </p>
 
@@ -675,7 +844,7 @@ async function processAndUpload() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         audioUrl: audioFile.url,
-        testName: currentTest,
+        testName: isWarmupSplitter ? '_WARMUP_' + currentTest : currentTest,
         markers: markers,
       }),
     });
@@ -683,15 +852,25 @@ async function processAndUpload() {
     const result = await response.json();
 
     if (result.success) {
-      // Update test segments with URLs
-      testSegments = result.segmentUrls;
+      if (isWarmupSplitter) {
+        // Update warmup segments with URLs
+        warmupSegments = result.segmentUrls;
+        alert(`Success! Created ${result.segmentUrls.length} warmup segments`);
 
-      alert(`Success! Created ${result.segmentUrls.length} segments`);
+        // Close splitter and refresh
+        clearAudioFile();
+        document.getElementById('warmupAudioSplitterContainer').style.display = 'none';
+        renderUniversalInstructionsEditor();
+      } else {
+        // Update test segments with URLs
+        testSegments = result.segmentUrls;
+        alert(`Success! Created ${result.segmentUrls.length} segments`);
 
-      // Close splitter and refresh
-      clearAudioFile();
-      document.getElementById('audioSplitterContainer').style.display = 'none';
-      renderSegments();
+        // Close splitter and refresh
+        clearAudioFile();
+        document.getElementById('audioSplitterContainer').style.display = 'none';
+        renderSegments();
+      }
     } else {
       throw new Error(result.message || 'Upload failed');
     }
