@@ -616,13 +616,13 @@ class RecordingManager {
           <p style="font-size: 18px; color: #666; margin: 20px 0;">
             Your recording has been securely saved.
           </p>
-          <div style="background: #d4edda; border-left: 4px solid #4caf50; padding: 20px; border-radius: 8px; text-align: left;">
-            <p style="margin: 0; font-size: 14px; color: #155724;">
-              <strong>✓ You may now close this window safely.</strong>
-            </p>
-          </div>
         </div>
       `;
+
+      // Auto-close modal after 2 seconds
+      setTimeout(() => {
+        modal.style.display = 'none';
+      }, 2000);
     }
   }
 
