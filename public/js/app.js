@@ -1194,8 +1194,11 @@ function loadSegment(index) {
   });
 
   // Test/Practice mode: Enable continue button immediately
+  // ONLY for monkey@aalb.org test account OR when Practice Mode checkbox was checked
   const testEmail = studentData?.email?.toLowerCase().trim();
   const isTestAccount = testEmail === 'monkey@aalb.org';
+
+  console.log('Continue button check:', { testEmail, isTestAccount, isPracticeMode });
 
   if (isTestAccount || isPracticeMode) {
     const continueBtn = document.getElementById('continueBtn');
@@ -1203,6 +1206,13 @@ function loadSegment(index) {
       continueBtn.disabled = false;
       continueBtn.style.opacity = '1';
       console.log(isPracticeMode ? 'PRACTICE MODE' : 'TEST MODE', ': Continue button enabled immediately');
+    }
+  } else {
+    // Ensure button stays disabled for regular users
+    const continueBtn = document.getElementById('continueBtn');
+    if (continueBtn) {
+      continueBtn.disabled = true;
+      continueBtn.style.opacity = '0.5';
     }
   }
 
