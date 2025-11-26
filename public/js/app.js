@@ -14,6 +14,7 @@ let testTimer = null;
 let testConfig = null;
 let isWarmupMode = false;
 let warmupCompleted = false;
+let isPracticeMode = false;
 
 // Test configuration - will be loaded based on permitted test
 const TEST_CONFIGS = {
@@ -84,6 +85,13 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
 
   const email = document.getElementById('email').value.trim();
   const studentId = document.getElementById('studentId').value.trim();
+  const practiceModeCheckbox = document.getElementById('practiceMode');
+  isPracticeMode = practiceModeCheckbox?.checked || false;
+
+  if (isPracticeMode) {
+    console.log('PRACTICE MODE enabled - proctoring will be skipped');
+  }
+
   const errorDiv = document.getElementById('loginError');
   const loginBtn = document.getElementById('loginBtn');
 
@@ -558,6 +566,13 @@ function checkIfReadyToContinue() {
 
 // Request screen sharing before continuing to proctor setup - MUST share entire screen
 async function requestScreenShareAndContinue() {
+  // Practice mode: Skip screen sharing and proctor setup entirely
+  if (isPracticeMode) {
+    console.log('PRACTICE MODE: Skipping screen sharing and proctor setup');
+    showPage('page5'); // Go directly to test instructions
+    return;
+  }
+
   let attempts = 0;
   const maxAttempts = 5;
 
@@ -1165,15 +1180,16 @@ function loadSegment(index) {
     alert(`❌ Failed to play audio\n\nSegment ${index + 1} - ${err.message}\n\nPlease check your connection and try again.`);
   });
 
-  // Test mode: Enable continue button immediately for test account
+  // Test/Practice mode: Enable continue button immediately
   const testEmail = studentData?.email?.toLowerCase().trim();
-  console.log('Checking test mode for email:', testEmail);
-  if (testEmail === 'monkey@aalb.org') {
+  const isTestAccount = testEmail === 'monkey@aalb.org';
+
+  if (isTestAccount || isPracticeMode) {
     const continueBtn = document.getElementById('continueBtn');
     if (continueBtn) {
       continueBtn.disabled = false;
       continueBtn.style.opacity = '1';
-      console.log('TEST MODE: Continue button enabled immediately for monkey@aalb.org');
+      console.log(isPracticeMode ? 'PRACTICE MODE' : 'TEST MODE', ': Continue button enabled immediately');
     }
   }
 
