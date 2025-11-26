@@ -663,6 +663,8 @@ class RecordingManager {
     } catch (error) {
       console.error(`[${this.deviceType}] Final upload error:`, error);
       this.showNotification('Upload failed - data saved locally for recovery', 'error');
+      // Hide modal on error too
+      this.hideUploadProgressModal();
       throw error;
     }
   }
