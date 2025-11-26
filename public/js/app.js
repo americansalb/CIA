@@ -678,6 +678,14 @@ showPage = async function(pageId) {
   }
 
   if (pageId === 'page5') {
+    // Show Practice Mode overlay if no camera
+    if (isPracticeMode) {
+      const overlay = document.getElementById('practiceModeOverlay');
+      if (overlay) {
+        overlay.style.display = 'flex';
+      }
+    }
+
     // Set up video displays and recording (only if camera is available)
     if (mainStream) {
       document.getElementById('mainVideo').srcObject = mainStream;
