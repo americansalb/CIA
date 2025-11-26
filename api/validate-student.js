@@ -20,6 +20,10 @@ module.exports = async (req, res) => {
       });
     }
 
+    // Log student login for debugging
+    const isTestMode = student.email.toLowerCase().trim() === 'monkey@aalb.org';
+    console.log(`Student login: ${student.email} (ID: ${student.studentId}) - Test mode: ${isTestMode}`);
+
     res.json({
       success: true,
       student: {
