@@ -1166,7 +1166,9 @@ function loadSegment(index) {
   });
 
   // Test mode: Enable continue button immediately for test account
-  if (studentData && studentData.email === 'monkey@aalb.org') {
+  const testEmail = studentData?.email?.toLowerCase().trim();
+  console.log('Checking test mode for email:', testEmail);
+  if (testEmail === 'monkey@aalb.org') {
     const continueBtn = document.getElementById('continueBtn');
     if (continueBtn) {
       continueBtn.disabled = false;
