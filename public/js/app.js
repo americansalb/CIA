@@ -1193,16 +1193,23 @@ function loadSegment(index) {
     alert(`❌ Failed to play audio\n\nSegment ${index + 1} - ${err.message}\n\nPlease check your connection and try again.`);
   });
 
-  // Test/Practice mode: Enable continue button immediately
+  // Test mode: Enable continue button immediately ONLY for monkey@aalb.org
   const testEmail = studentData?.email?.toLowerCase().trim();
   const isTestAccount = testEmail === 'monkey@aalb.org';
 
-  if (isTestAccount || isPracticeMode) {
+  if (isTestAccount) {
     const continueBtn = document.getElementById('continueBtn');
     if (continueBtn) {
       continueBtn.disabled = false;
       continueBtn.style.opacity = '1';
-      console.log(isPracticeMode ? 'PRACTICE MODE' : 'TEST MODE', ': Continue button enabled immediately');
+      console.log('TEST MODE (monkey@aalb.org): Continue button enabled immediately');
+    }
+  } else {
+    // Ensure button stays disabled for regular users and Practice Mode
+    const continueBtn = document.getElementById('continueBtn');
+    if (continueBtn) {
+      continueBtn.disabled = true;
+      continueBtn.style.opacity = '0.5';
     }
   }
 
