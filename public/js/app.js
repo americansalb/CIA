@@ -191,25 +191,14 @@ function setupProctorPage() {
   document.getElementById('pinDisplay').textContent = sessionData.proctorPin;
   document.getElementById('proctorUrl').textContent = `${window.location.origin}/proctor`;
 
-  // Generate QR code for proctor device to scan
+  // Generate QR code for proctor device to scan using QR code API
   const proctorUrl = `${window.location.origin}/proctor?pin=${sessionData.proctorPin}`;
-  const qrCanvas = document.getElementById('qrCode');
+  const qrImage = document.getElementById('qrCode');
 
-  if (qrCanvas && typeof QRCode !== 'undefined') {
-    QRCode.toCanvas(qrCanvas, proctorUrl, {
-      width: 200,
-      margin: 2,
-      color: {
-        dark: '#00897b',
-        light: '#ffffff'
-      }
-    }, function(error) {
-      if (error) {
-        console.error('QR code generation failed:', error);
-      } else {
-        console.log('QR code generated for:', proctorUrl);
-      }
-    });
+  if (qrImage) {
+    const encodedUrl = encodeURIComponent(proctorUrl);
+    qrImage.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodedUrl}&color=00897b`;
+    console.log('QR code generated for:', proctorUrl);
   }
 
   // Poll for proctor connection
