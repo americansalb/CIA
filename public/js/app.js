@@ -1413,9 +1413,10 @@ async function endTest(reason = 'Test completed') {
   // Mark test as complete (enables safe page closing)
   markTestComplete();
 
-  // Hide upload progress modal (if it was shown)
-  if (mainRecorder) {
-    mainRecorder.hideUploadProgressModal();
+  // Force hide upload progress modal
+  const uploadModal = document.getElementById('uploadProgressModal');
+  if (uploadModal) {
+    uploadModal.style.display = 'none';
   }
 
   // Calculate duration
