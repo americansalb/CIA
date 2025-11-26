@@ -34,111 +34,157 @@ class RecordingBackup {
   }
 
   async saveChunk(sessionId, deviceType, chunkNumber, blob, uploaded = false) {
-    const transaction = this.db.transaction(['chunks'], 'readwrite');
-    const store = transaction.objectStore('chunks');
+    // Don't let IndexedDB errors break the app
+    if (!this.db) {
+      console.warn('IndexedDB not available, skipping chunk save');
+      return null;
+    }
 
-    const chunkData = {
-      sessionId,
-      deviceType,
-      chunkNumber,
-      blob,
-      uploaded,
-      timestamp: Date.now(),
-    };
+    try {
+      const transaction = this.db.transaction(['chunks'], 'readwrite');
+      const store = transaction.objectStore('chunks');
 
-    return new Promise((resolve, reject) => {
-      const request = store.add(chunkData);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+      const chunkData = {
+        sessionId,
+        deviceType,
+        chunkNumber,
+        blob,
+        uploaded,
+        timestamp: Date.now(),
+      };
+
+      return new Promise((resolve, reject) => {
+        const request = store.add(chunkData);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => {
+          console.warn('IndexedDB saveChunk error (non-fatal):', request.error);
+          resolve(null); // Don't reject, just continue
+        };
+      });
+    } catch (error) {
+      console.warn('IndexedDB saveChunk exception (non-fatal):', error);
+      return null;
+    }
   }
 
   async markChunkUploaded(chunkId) {
-    const transaction = this.db.transaction(['chunks'], 'readwrite');
-    const store = transaction.objectStore('chunks');
+    if (!this.db || !chunkId) return;
 
-    return new Promise((resolve, reject) => {
-      const getRequest = store.get(chunkId);
-      getRequest.onsuccess = () => {
-        const chunk = getRequest.result;
-        if (chunk) {
-          chunk.uploaded = true;
-          const updateRequest = store.put(chunk);
-          updateRequest.onsuccess = () => resolve();
-          updateRequest.onerror = () => reject(updateRequest.error);
-        } else {
-          resolve();
-        }
-      };
-      getRequest.onerror = () => reject(getRequest.error);
-    });
+    try {
+      const transaction = this.db.transaction(['chunks'], 'readwrite');
+      const store = transaction.objectStore('chunks');
+
+      return new Promise((resolve) => {
+        const getRequest = store.get(chunkId);
+        getRequest.onsuccess = () => {
+          const chunk = getRequest.result;
+          if (chunk) {
+            chunk.uploaded = true;
+            const updateRequest = store.put(chunk);
+            updateRequest.onsuccess = () => resolve();
+            updateRequest.onerror = () => resolve(); // Don't fail
+          } else {
+            resolve();
+          }
+        };
+        getRequest.onerror = () => resolve(); // Don't fail
+      });
+    } catch (error) {
+      console.warn('IndexedDB markChunkUploaded exception (non-fatal):', error);
+    }
   }
 
   async getUnuploadedChunks(sessionId) {
-    const transaction = this.db.transaction(['chunks'], 'readonly');
-    const store = transaction.objectStore('chunks');
-    const index = store.index('sessionId');
+    if (!this.db) return [];
 
-    return new Promise((resolve, reject) => {
-      const request = index.getAll(sessionId);
-      request.onsuccess = () => {
-        const chunks = request.result.filter(chunk => !chunk.uploaded);
-        resolve(chunks);
-      };
-      request.onerror = () => reject(request.error);
-    });
+    try {
+      const transaction = this.db.transaction(['chunks'], 'readonly');
+      const store = transaction.objectStore('chunks');
+      const index = store.index('sessionId');
+
+      return new Promise((resolve) => {
+        const request = index.getAll(sessionId);
+        request.onsuccess = () => {
+          const chunks = request.result.filter(chunk => !chunk.uploaded);
+          resolve(chunks);
+        };
+        request.onerror = () => resolve([]); // Return empty array on error
+      });
+    } catch (error) {
+      console.warn('IndexedDB getUnuploadedChunks exception (non-fatal):', error);
+      return [];
+    }
   }
 
   async saveMetadata(sessionId, data) {
-    const transaction = this.db.transaction(['metadata'], 'readwrite');
-    const store = transaction.objectStore('metadata');
+    if (!this.db) return;
 
-    const metadata = {
-      sessionId,
-      ...data,
-      lastUpdated: Date.now(),
-    };
+    try {
+      const transaction = this.db.transaction(['metadata'], 'readwrite');
+      const store = transaction.objectStore('metadata');
 
-    return new Promise((resolve, reject) => {
-      const request = store.put(metadata);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+      const metadata = {
+        sessionId,
+        ...data,
+        lastUpdated: Date.now(),
+      };
+
+      return new Promise((resolve) => {
+        const request = store.put(metadata);
+        request.onsuccess = () => resolve();
+        request.onerror = () => resolve(); // Don't fail
+      });
+    } catch (error) {
+      console.warn('IndexedDB saveMetadata exception (non-fatal):', error);
+    }
   }
 
   async getMetadata(sessionId) {
-    const transaction = this.db.transaction(['metadata'], 'readonly');
-    const store = transaction.objectStore('metadata');
+    if (!this.db) return null;
 
-    return new Promise((resolve, reject) => {
-      const request = store.get(sessionId);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+    try {
+      const transaction = this.db.transaction(['metadata'], 'readonly');
+      const store = transaction.objectStore('metadata');
+
+      return new Promise((resolve) => {
+        const request = store.get(sessionId);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => resolve(null); // Don't fail
+      });
+    } catch (error) {
+      console.warn('IndexedDB getMetadata exception (non-fatal):', error);
+      return null;
+    }
   }
 
   async clearSession(sessionId) {
-    const transaction = this.db.transaction(['chunks', 'metadata'], 'readwrite');
-    const chunkStore = transaction.objectStore('chunks');
-    const metadataStore = transaction.objectStore('metadata');
+    if (!this.db) return;
 
-    const index = chunkStore.index('sessionId');
-    const range = IDBKeyRange.only(sessionId);
+    try {
+      const transaction = this.db.transaction(['chunks', 'metadata'], 'readwrite');
+      const chunkStore = transaction.objectStore('chunks');
+      const metadataStore = transaction.objectStore('metadata');
 
-    return new Promise((resolve, reject) => {
-      const deleteChunks = index.openCursor(range);
-      deleteChunks.onsuccess = (event) => {
-        const cursor = event.target.result;
-        if (cursor) {
-          cursor.delete();
-          cursor.continue();
-        }
-      };
+      const index = chunkStore.index('sessionId');
+      const range = IDBKeyRange.only(sessionId);
 
-      metadataStore.delete(sessionId);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-    });
+      return new Promise((resolve) => {
+        const deleteChunks = index.openCursor(range);
+        deleteChunks.onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            cursor.delete();
+            cursor.continue();
+          }
+        };
+
+        metadataStore.delete(sessionId);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => resolve(); // Don't fail
+      });
+    } catch (error) {
+      console.warn('IndexedDB clearSession exception (non-fatal):', error);
+    }
   }
 }
 
