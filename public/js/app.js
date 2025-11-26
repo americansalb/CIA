@@ -193,20 +193,21 @@ function setupProctorPage() {
 
   // Generate QR code for proctor device to scan
   const proctorUrl = `${window.location.origin}/proctor?pin=${sessionData.proctorPin}`;
-  const qrCanvas = document.getElementById('qrCode');
+  const qrImage = document.getElementById('qrCode');
 
-  if (qrCanvas && typeof QRCode !== 'undefined') {
-    QRCode.toCanvas(qrCanvas, proctorUrl, {
+  if (qrImage && typeof QRCode !== 'undefined') {
+    QRCode.toDataURL(proctorUrl, {
       width: 200,
       margin: 2,
       color: {
         dark: '#00897b',
         light: '#ffffff'
       }
-    }, function(error) {
+    }, function(error, url) {
       if (error) {
         console.error('QR code generation failed:', error);
       } else {
+        qrImage.src = url;
         console.log('QR code generated for:', proctorUrl);
       }
     });
