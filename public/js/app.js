@@ -678,7 +678,15 @@ showPage = async function(pageId) {
   }
 
   if (pageId === 'page5') {
-    // Set up video displays
+    // Show Practice Mode overlay if no camera
+    if (isPracticeMode) {
+      const overlay = document.getElementById('practiceModeOverlay');
+      if (overlay) {
+        overlay.style.display = 'flex';
+      }
+    }
+
+    // Set up video displays and recording (only if camera is available)
     if (mainStream) {
       document.getElementById('mainVideo').srcObject = mainStream;
 
@@ -697,11 +705,6 @@ showPage = async function(pageId) {
         }
       }
 
-      // Note: Proctor recorder will be managed by the proctor device
-      // Hide the video element since recording is on separate device
-      // The proctorStatusBox in HTML will show connection status
-      document.getElementById('proctorVideo').style.display = 'none';
-
       // Start continuous quality monitoring during test
       startTestQualityMonitoring();
 
@@ -714,24 +717,28 @@ showPage = async function(pageId) {
       // Start audio visualization
       startAudioVisualization();
 
-      // Start test timer
-      testStartTime = Date.now();
-      startTestTimer();
-
-      // Mark test as in progress for data loss prevention
-      markTestInProgress();
-
       // Initialize live monitoring with WebRTC
       initializeLiveMonitoring();
+    }
 
-      // Show pre-session overlay - test cannot start until pre-session is done
-      if (!isWarmupMode) {
-        console.log('Showing pre-session overlay for test');
-        showPreSessionOverlay();
-      } else {
-        console.log('Starting pre-session modal for warmup');
-        startMandatoryPreSession();
-      }
+    // Hide proctor video element (recording is on separate device)
+    document.getElementById('proctorVideo').style.display = 'none';
+
+    // These run regardless of camera (Practice Mode needs these)
+    // Start test timer
+    testStartTime = Date.now();
+    startTestTimer();
+
+    // Mark test as in progress for data loss prevention
+    markTestInProgress();
+
+    // Show pre-session overlay - test cannot start until pre-session is done
+    if (!isWarmupMode) {
+      console.log('Showing pre-session overlay for test');
+      showPreSessionOverlay();
+    } else {
+      console.log('Starting pre-session modal for warmup');
+      startMandatoryPreSession();
     }
   }
 };
