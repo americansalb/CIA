@@ -168,8 +168,14 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
           console.error('✗ universalResult failed or no config!');
         }
 
-        // Go straight to camera/mic setup
-        showPage('page4');
+        // Practice mode: Skip ALL proctoring (camera, screen share, proctor device)
+        if (isPracticeMode) {
+          console.log('PRACTICE MODE: Skipping all proctoring, going directly to test instructions');
+          showPage('page5');
+        } else {
+          // Normal mode: Go to camera/mic setup
+          showPage('page4');
+        }
       } else {
         throw new Error(sessionResult.message);
       }
@@ -1285,9 +1291,11 @@ function startIntervention() {
   document.getElementById('interventionStep1').style.display = 'block';
   document.getElementById('interventionStep2').style.display = 'none';
 
-  // Start recording intervention
-  interventionRecorder = new InterventionRecorder(sessionData.sessionId);
-  interventionRecorder.startRecording(mainStream);
+  // Start recording intervention (only if camera is available)
+  if (mainStream) {
+    interventionRecorder = new InterventionRecorder(sessionData.sessionId);
+    interventionRecorder.startRecording(mainStream);
+  }
 
   // 15-second timer
   let timeLeft = 15;
@@ -1312,8 +1320,10 @@ async function finishIntervention() {
     clearInterval(window.interventionCountdown);
   }
 
-  // Stop recording
-  await interventionRecorder.stopRecording();
+  // Stop recording (if available)
+  if (interventionRecorder) {
+    await interventionRecorder.stopRecording();
+  }
 
   // Show action selection
   document.getElementById('interventionStep1').style.display = 'none';
@@ -1324,7 +1334,9 @@ async function selectInterventionAction(action) {
   interventionCount++;
   updateInterventionDisplay();
 
-  interventionRecorder.setInterventionAction(action);
+  if (interventionRecorder) {
+    interventionRecorder.setInterventionAction(action);
+  }
 
   if (action === 'repeat') {
     // Replay current segment
