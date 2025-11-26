@@ -606,6 +606,26 @@ class RecordingManager {
     }
   }
 
+  showUploadComplete() {
+    const modal = document.getElementById('uploadProgressModal');
+    if (modal) {
+      modal.innerHTML = `
+        <div style="background: white; padding: 50px; border-radius: 16px; max-width: 600px; text-align: center; min-width: 500px;">
+          <div style="font-size: 64px; margin-bottom: 20px;">✅</div>
+          <h2 style="margin-top: 0; color: #4caf50; font-size: 28px;">Upload Complete!</h2>
+          <p style="font-size: 18px; color: #666; margin: 20px 0;">
+            Your recording has been securely saved.
+          </p>
+          <div style="background: #d4edda; border-left: 4px solid #4caf50; padding: 20px; border-radius: 8px; text-align: left;">
+            <p style="margin: 0; font-size: 14px; color: #155724;">
+              <strong>✓ You may now close this window safely.</strong>
+            </p>
+          </div>
+        </div>
+      `;
+    }
+  }
+
   async uploadFinalVideo(interventionCount = 0) {
     if (this.allChunks.length === 0) {
       console.warn(`[${this.deviceType}] No chunks to upload for final video`);
@@ -631,6 +651,7 @@ class RecordingManager {
       if (result.success) {
         console.log(`[${this.deviceType}] Final video uploaded successfully`);
         this.showNotification('Recording uploaded successfully!', 'success');
+        this.showUploadComplete();
 
         // Clear IndexedDB data for this session
         await recordingBackup.clearSession(this.sessionId);

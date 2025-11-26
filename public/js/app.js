@@ -1165,6 +1165,16 @@ function loadSegment(index) {
     alert(`❌ Failed to play audio\n\nSegment ${index + 1} - ${err.message}\n\nPlease check your connection and try again.`);
   });
 
+  // Test mode: Enable continue button immediately for test account
+  if (studentData && studentData.email === 'monkey@aalb.org') {
+    const continueBtn = document.getElementById('continueBtn');
+    if (continueBtn) {
+      continueBtn.disabled = false;
+      continueBtn.style.opacity = '1';
+      console.log('TEST MODE: Continue button enabled immediately for monkey@aalb.org');
+    }
+  }
+
   // When audio ends, enable continue button
   audioPlayer.onended = () => {
     console.log(`Audio ended for ${isWarmupMode ? 'warmup' : 'test'} segment ${index + 1}/${testConfig.segments.length}`);
