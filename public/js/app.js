@@ -265,7 +265,7 @@ async function checkProctorConnection() {
   }, 2000); // Check every 2 seconds
 }
 
-// Request camera and microphone permissions
+// Request camera and microphone permissions with MUCH better error handling
 async function requestPermissions() {
   const errorDiv = document.getElementById('permissionError');
   const warningDiv = document.getElementById('qualityWarning');
@@ -276,50 +276,115 @@ async function requestPermissions() {
   errorDiv.style.display = 'none';
   warningDiv.style.display = 'none';
   requestBtn.disabled = true;
+  requestBtn.textContent = 'Checking...';
 
-  try {
-    mainStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        facingMode: 'user',
-      },
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        sampleRate: 48000,
-      },
-    });
+  // Step 1: Check browser compatibility
+  const compatCheck = checkBrowserCompatibility();
+  if (!compatCheck.compatible) {
+    showPermissionError(compatCheck.error, compatCheck.action, false);
+    requestBtn.disabled = false;
+    requestBtn.textContent = 'Grant Permissions';
+    return;
+  }
 
-    // Show preview
-    const previewVideo = document.getElementById('previewVideo');
-    previewVideo.srcObject = mainStream;
-    qualityChecks.style.display = 'block';
+  // Step 2: Check if permissions were previously denied
+  const permStatus = await checkPermissionStatus();
+  if (permStatus.camera === 'denied' || permStatus.microphone === 'denied') {
+    showPermissionError(
+      'Camera or microphone permission was previously denied.',
+      getPermissionResetInstructions(),
+      false
+    );
+    requestBtn.disabled = false;
+    requestBtn.textContent = 'Grant Permissions';
+    return;
+  }
 
-    // Check video quality
-    previewVideo.onloadedmetadata = () => {
-      const width = previewVideo.videoWidth;
-      const height = previewVideo.videoHeight;
+  // Step 3: Try to get media with progressive fallback
+  requestBtn.textContent = 'Requesting access...';
 
-      // Resolution check
-      const resolutionCheck = document.getElementById('resolutionCheck');
-      if (width >= 1280 && height >= 720) {
-        resolutionCheck.innerHTML = '<span style="color: #4caf50;">✓ Good (720p+)</span>';
-      } else if (width >= 640 && height >= 480) {
-        resolutionCheck.innerHTML = '<span style="color: #ff9800;">⚠ Acceptable (480p)</span>';
-        warningDiv.textContent = 'Video resolution is lower than recommended. Please use a better camera if possible.';
-        warningDiv.style.display = 'block';
-      } else {
-        resolutionCheck.innerHTML = '<span style="color: #f44336;">✗ Too Low</span>';
-        warningDiv.textContent = 'Video resolution is too low. Please use a better camera.';
-        warningDiv.style.display = 'block';
+  const constraintConfigs = [
+    // Attempt 1: High quality
+    {
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    },
+    // Attempt 2: Medium quality
+    {
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+      audio: { echoCancellation: true, noiseSuppression: true }
+    },
+    // Attempt 3: Minimum - just ask for any camera/mic
+    {
+      video: true,
+      audio: true
+    }
+  ];
+
+  let lastError = null;
+
+  for (let i = 0; i < constraintConfigs.length; i++) {
+    try {
+      console.log(`[Permissions] Attempt ${i + 1}:`, constraintConfigs[i]);
+      mainStream = await navigator.mediaDevices.getUserMedia(constraintConfigs[i]);
+      console.log(`[Permissions] Success on attempt ${i + 1}`);
+      break; // Success!
+    } catch (error) {
+      console.warn(`[Permissions] Attempt ${i + 1} failed:`, error.name, error.message);
+      lastError = error;
+
+      // Don't retry for permission-related errors
+      if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+        break;
       }
+    }
+  }
 
-      // Start quality checks
-      checkVideoQuality();
-    };
+  // If we don't have a stream, handle the error
+  if (!mainStream) {
+    handleMediaError(lastError);
+    requestBtn.disabled = false;
+    requestBtn.textContent = 'Try Again';
+    return;
+  }
 
-    // Test microphone
+  // Success! Show preview
+  requestBtn.textContent = 'Setting up...';
+  const previewVideo = document.getElementById('previewVideo');
+  previewVideo.srcObject = mainStream;
+  qualityChecks.style.display = 'block';
+
+  // Check video quality
+  previewVideo.onloadedmetadata = () => {
+    const width = previewVideo.videoWidth;
+    const height = previewVideo.videoHeight;
+
+    const resolutionCheck = document.getElementById('resolutionCheck');
+    if (width >= 1280 && height >= 720) {
+      resolutionCheck.innerHTML = '<span style="color: #4caf50;">✓ Good (720p+)</span>';
+    } else if (width >= 640 && height >= 480) {
+      resolutionCheck.innerHTML = '<span style="color: #ff9800;">⚠ Acceptable (480p)</span>';
+      warningDiv.textContent = 'Video resolution is lower than recommended, but will work.';
+      warningDiv.style.display = 'block';
+    } else {
+      resolutionCheck.innerHTML = '<span style="color: #ff9800;">⚠ Low (' + width + 'x' + height + ')</span>';
+      warningDiv.textContent = 'Video resolution is low, but we can continue.';
+      warningDiv.style.display = 'block';
+    }
+
+    checkVideoQuality();
+  };
+
+  // Test microphone with webkit fallback
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) {
+      console.warn('AudioContext not supported, skipping mic test');
+      document.getElementById('micStatus').innerHTML = '<span style="color: #ff9800;">⚠ Cannot test (old browser)</span>';
+      checkIfReadyToContinue();
+      return;
+    }
+
     const audioContext = new AudioContext();
     const analyser = audioContext.createAnalyser();
     const microphone = audioContext.createMediaStreamSource(mainStream);
@@ -328,31 +393,214 @@ async function requestPermissions() {
 
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     let micWorking = false;
+    let checkCount = 0;
+    const maxChecks = 150; // 5 seconds at 30fps
 
     function checkAudio() {
+      checkCount++;
       analyser.getByteFrequencyData(dataArray);
       const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-      document.getElementById('micLevel').textContent = average > 10 ? '✓ Working' : 'Speak to test...';
 
-      if (average > 10 && !micWorking) {
+      const micLevelEl = document.getElementById('micLevel');
+      if (micLevelEl) {
+        micLevelEl.textContent = average > 5 ? '✓ Working' : 'Speak to test...';
+      }
+
+      if (average > 5 && !micWorking) {
         micWorking = true;
-        setTimeout(() => {
-          document.getElementById('micStatus').innerHTML = '<span style="color: #4caf50;">✓ Microphone is working</span>';
-          checkIfReadyToContinue();
-        }, 1000);
-      } else if (!micWorking) {
+        const micStatusEl = document.getElementById('micStatus');
+        if (micStatusEl) {
+          micStatusEl.innerHTML = '<span style="color: #4caf50;">✓ Microphone is working</span>';
+        }
+        checkIfReadyToContinue();
+      } else if (!micWorking && checkCount < maxChecks) {
         requestAnimationFrame(checkAudio);
+      } else if (!micWorking) {
+        // After 5 seconds, allow continuing even if mic wasn't detected
+        const micStatusEl = document.getElementById('micStatus');
+        if (micStatusEl) {
+          micStatusEl.innerHTML = '<span style="color: #ff9800;">⚠ No sound detected (may still work)</span>';
+        }
+        checkIfReadyToContinue();
       }
     }
 
     checkAudio();
-
-  } catch (error) {
-    console.error('Permission error:', error);
-    errorDiv.textContent = 'Failed to access camera and microphone. Please grant permissions and try again.';
-    errorDiv.style.display = 'block';
-    requestBtn.disabled = false;
+  } catch (audioError) {
+    console.error('Audio test error:', audioError);
+    document.getElementById('micStatus').innerHTML = '<span style="color: #ff9800;">⚠ Could not test microphone</span>';
+    checkIfReadyToContinue();
   }
+
+  requestBtn.textContent = 'Permissions Granted ✓';
+}
+
+// Check browser compatibility before requesting permissions
+function checkBrowserCompatibility() {
+  // Check HTTPS
+  if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+    return {
+      compatible: false,
+      error: 'Secure connection required',
+      action: 'Camera access requires HTTPS. Please access this site using https:// instead of http://'
+    };
+  }
+
+  // Check getUserMedia support
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return {
+      compatible: false,
+      error: 'Browser not supported',
+      action: 'Your browser does not support camera access. Please use Chrome, Firefox, Safari, or Edge.'
+    };
+  }
+
+  return { compatible: true };
+}
+
+// Check current permission status without prompting
+async function checkPermissionStatus() {
+  const status = { camera: 'unknown', microphone: 'unknown' };
+
+  if (navigator.permissions) {
+    try {
+      const cam = await navigator.permissions.query({ name: 'camera' });
+      status.camera = cam.state;
+    } catch (e) { /* not supported */ }
+
+    try {
+      const mic = await navigator.permissions.query({ name: 'microphone' });
+      status.microphone = mic.state;
+    } catch (e) { /* not supported */ }
+  }
+
+  return status;
+}
+
+// Handle specific media errors with helpful messages
+function handleMediaError(error) {
+  let title = 'Camera/Microphone Error';
+  let message = '';
+  let action = '';
+  let canRetry = true;
+
+  switch (error.name) {
+    case 'NotAllowedError':
+    case 'PermissionDeniedError':
+      title = 'Permission Denied';
+      message = 'You denied camera/microphone access, or it was blocked.';
+      action = getPermissionResetInstructions();
+      canRetry = false;
+      break;
+
+    case 'NotFoundError':
+    case 'DevicesNotFoundError':
+      title = 'No Camera/Microphone Found';
+      message = 'We could not find a camera or microphone on this device.';
+      action = '1. Make sure a camera and microphone are connected\n2. Check that they are not disabled in device settings\n3. Try unplugging and reconnecting them\n4. Click "Try Again"';
+      break;
+
+    case 'NotReadableError':
+    case 'TrackStartError':
+      title = 'Camera/Microphone In Use';
+      message = 'Your camera or microphone is being used by another application.';
+      action = '1. Close other apps that might use your camera:\n   • Zoom, Skype, Teams, Google Meet\n   • Other browser tabs with video\n   • Photo/video apps\n2. Click "Try Again"';
+      break;
+
+    case 'OverconstrainedError':
+      title = 'Camera Settings Issue';
+      message = 'Your camera does not support the required settings.';
+      action = 'We tried multiple settings but none worked. Please try a different camera or browser.';
+      break;
+
+    case 'SecurityError':
+      title = 'Security Error';
+      message = 'Camera access was blocked for security reasons.';
+      action = 'Make sure you are using HTTPS and that this site is not blocked in your browser settings.';
+      canRetry = false;
+      break;
+
+    case 'AbortError':
+      title = 'Request Cancelled';
+      message = 'The camera request was interrupted.';
+      action = 'Please click "Try Again" to retry.';
+      break;
+
+    default:
+      title = 'Unexpected Error';
+      message = error.message || 'An unknown error occurred.';
+      action = 'Please refresh the page and try again. If the problem persists, try a different browser.';
+  }
+
+  showPermissionError(title + ': ' + message, action, canRetry);
+}
+
+// Get browser-specific instructions for resetting permissions
+function getPermissionResetInstructions() {
+  const ua = navigator.userAgent.toLowerCase();
+
+  if (ua.includes('chrome') && !ua.includes('edg')) {
+    return `To fix this in Chrome:
+1. Click the camera icon 🎥 in the address bar (right side)
+2. Select "Always allow" for both camera and microphone
+3. Click "Done"
+4. Refresh this page (Ctrl+R or Cmd+R)
+
+Or go to: chrome://settings/content/camera`;
+  }
+
+  if (ua.includes('firefox')) {
+    return `To fix this in Firefox:
+1. Click the lock icon 🔒 in the address bar
+2. Click the X next to "Blocked" for camera/microphone
+3. Refresh this page (Ctrl+R or Cmd+R)
+
+Or go to: Settings → Privacy & Security → Permissions`;
+  }
+
+  if (ua.includes('safari') && !ua.includes('chrome')) {
+    return `To fix this in Safari:
+1. Click Safari menu → Settings for This Website
+2. Set Camera and Microphone to "Allow"
+3. Refresh this page (Cmd+R)
+
+Or go to: Safari → Preferences → Websites → Camera`;
+  }
+
+  if (ua.includes('edg')) {
+    return `To fix this in Edge:
+1. Click the lock icon 🔒 in the address bar
+2. Set Camera and Microphone to "Allow"
+3. Refresh this page (Ctrl+R)
+
+Or go to: edge://settings/content/camera`;
+  }
+
+  return `To allow camera access:
+1. Look for a camera or lock icon in your browser's address bar
+2. Click it and change permissions to "Allow"
+3. Refresh this page
+
+If you don't see the icon, check your browser's settings for site permissions.`;
+}
+
+// Show permission error with formatted message
+function showPermissionError(message, action, canRetry) {
+  const errorDiv = document.getElementById('permissionError');
+
+  errorDiv.innerHTML = `
+    <div style="margin-bottom: 10px;"><strong>${escapeHtml(message)}</strong></div>
+    <div style="background: #fff; padding: 15px; border-radius: 6px; text-align: left; white-space: pre-wrap; font-family: system-ui, sans-serif; font-size: 13px; line-height: 1.6; color: #333;">${escapeHtml(action)}</div>
+    ${!canRetry ? '<div style="margin-top: 10px; color: #d32f2f;"><strong>You may need to refresh the page after changing permissions.</strong></div>' : ''}
+  `;
+  errorDiv.style.display = 'block';
+}
+
+// Escape HTML to prevent XSS
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // Check video quality (lighting and face detection)
