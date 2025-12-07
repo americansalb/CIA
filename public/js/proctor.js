@@ -76,6 +76,12 @@ function showProctorPage(pageId) {
 let currentFacingMode = 'user'; // Start with front camera (default for phone/tablet)
 
 async function setupProctorVerification() {
+  // Stop any existing stream before requesting new one
+  if (proctorStream) {
+    proctorStream.getTracks().forEach(track => track.stop());
+    proctorStream = null;
+  }
+
   // Try multiple constraint configurations
   const constraintConfigs = [
     // Attempt 1: High quality with preferred facing mode

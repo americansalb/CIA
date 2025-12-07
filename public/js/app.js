@@ -278,6 +278,12 @@ async function requestPermissions() {
   requestBtn.disabled = true;
   requestBtn.textContent = 'Checking...';
 
+  // Stop any existing stream before requesting new one
+  if (mainStream) {
+    mainStream.getTracks().forEach(track => track.stop());
+    mainStream = null;
+  }
+
   // Step 1: Check browser compatibility
   const compatCheck = checkBrowserCompatibility();
   if (!compatCheck.compatible) {
@@ -375,6 +381,10 @@ async function requestPermissions() {
     checkVideoQuality();
   };
 
+  // Update button immediately - permissions are granted at this point
+  requestBtn.textContent = 'Permissions Granted ✓';
+  requestBtn.disabled = true;
+
   // Test microphone with webkit fallback
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -431,8 +441,6 @@ async function requestPermissions() {
     document.getElementById('micStatus').innerHTML = '<span style="color: #ff9800;">⚠ Could not test microphone</span>';
     checkIfReadyToContinue();
   }
-
-  requestBtn.textContent = 'Permissions Granted ✓';
 }
 
 // Check browser compatibility before requesting permissions
@@ -483,6 +491,12 @@ function handleMediaError(error) {
   let message = '';
   let action = '';
   let canRetry = true;
+
+  // Handle null/undefined error
+  if (!error) {
+    showPermissionError('Unknown Error: Could not access camera or microphone.', 'Please refresh the page and try again.', true);
+    return;
+  }
 
   switch (error.name) {
     case 'NotAllowedError':
