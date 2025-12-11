@@ -76,52 +76,164 @@ function showProctorPage(pageId) {
 let currentFacingMode = 'user'; // Start with front camera (default for phone/tablet)
 
 async function setupProctorVerification() {
-  try {
-    proctorStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        facingMode: currentFacingMode, // Use front camera by default
-      },
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        sampleRate: 48000,
-      },
-    });
-
-    // Show verification page with camera preview
-    showProctorPage('proctorVerification');
-
-    // Set up camera preview
-    const verificationVideo = document.getElementById('proctorVerificationView');
-    verificationVideo.srcObject = proctorStream;
-
-    // Set up checkbox handler
-    const checkbox = document.getElementById('proctorPositionConfirm');
-    const startBtn = document.getElementById('startProctorRecordingBtn');
-
-    checkbox.addEventListener('change', () => {
-      if (checkbox.checked) {
-        startBtn.disabled = false;
-        startBtn.style.opacity = '1';
-        startBtn.style.cursor = 'pointer';
-      } else {
-        startBtn.disabled = true;
-        startBtn.style.opacity = '0.5';
-        startBtn.style.cursor = 'not-allowed';
-      }
-    });
-
-    // Set up start button handler
-    startBtn.addEventListener('click', async () => {
-      await startProctorRecording();
-    });
-
-  } catch (error) {
-    console.error('Failed to access proctor camera:', error);
-    alert('Failed to access camera. Please grant permissions and refresh.');
+  // Stop any existing stream before requesting new one
+  if (proctorStream) {
+    proctorStream.getTracks().forEach(track => track.stop());
+    proctorStream = null;
   }
+
+  // Try multiple constraint configurations
+  const constraintConfigs = [
+    // Attempt 1: High quality with preferred facing mode
+    {
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: currentFacingMode },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    },
+    // Attempt 2: Medium quality
+    {
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: currentFacingMode },
+      audio: { echoCancellation: true, noiseSuppression: true }
+    },
+    // Attempt 3: Any camera, any audio
+    {
+      video: true,
+      audio: true
+    }
+  ];
+
+  let lastError = null;
+
+  for (let i = 0; i < constraintConfigs.length; i++) {
+    try {
+      console.log(`[Proctor] Camera attempt ${i + 1}:`, constraintConfigs[i]);
+      proctorStream = await navigator.mediaDevices.getUserMedia(constraintConfigs[i]);
+      console.log(`[Proctor] Camera success on attempt ${i + 1}`);
+      break;
+    } catch (error) {
+      console.warn(`[Proctor] Attempt ${i + 1} failed:`, error.name, error.message);
+      lastError = error;
+
+      // Don't retry for permission-related errors
+      if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+        break;
+      }
+    }
+  }
+
+  if (!proctorStream) {
+    // Show helpful error message based on error type
+    const errorMessage = getProctorErrorMessage(lastError);
+    showProctorError(errorMessage);
+    return;
+  }
+
+  // Show verification page with camera preview
+  showProctorPage('proctorVerification');
+
+  // Set up camera preview
+  const verificationVideo = document.getElementById('proctorVerificationView');
+  verificationVideo.srcObject = proctorStream;
+
+  // Set up checkbox handler
+  const checkbox = document.getElementById('proctorPositionConfirm');
+  const startBtn = document.getElementById('startProctorRecordingBtn');
+
+  checkbox.addEventListener('change', () => {
+    if (checkbox.checked) {
+      startBtn.disabled = false;
+      startBtn.style.opacity = '1';
+      startBtn.style.cursor = 'pointer';
+    } else {
+      startBtn.disabled = true;
+      startBtn.style.opacity = '0.5';
+      startBtn.style.cursor = 'not-allowed';
+    }
+  });
+
+  // Set up start button handler
+  startBtn.addEventListener('click', async () => {
+    await startProctorRecording();
+  });
+}
+
+// Get helpful error message for proctor camera
+function getProctorErrorMessage(error) {
+  if (!error) {
+    return 'Unknown error accessing camera. Please refresh and try again.';
+  }
+
+  switch (error.name) {
+    case 'NotAllowedError':
+    case 'PermissionDeniedError':
+      return `Camera permission denied.
+
+To fix this:
+1. Tap the lock/camera icon in your browser's address bar
+2. Allow camera and microphone access
+3. Refresh this page and try again
+
+On iPhone Safari: Go to Settings → Safari → Camera → Allow`;
+
+    case 'NotFoundError':
+    case 'DevicesNotFoundError':
+      return `No camera found on this device.
+
+Please make sure:
+1. Your device has a camera
+2. No other app is using the camera
+3. Camera is not disabled in settings`;
+
+    case 'NotReadableError':
+    case 'TrackStartError':
+      return `Camera is in use by another app.
+
+Please close these apps and try again:
+• Camera app
+• Other browser tabs with video
+• Video call apps (FaceTime, WhatsApp, etc.)`;
+
+    case 'OverconstrainedError':
+      return 'Your camera does not support the required settings. Please try a different device.';
+
+    case 'SecurityError':
+      return 'Camera access blocked for security reasons. Make sure you are using HTTPS.';
+
+    default:
+      return `Camera error: ${error.message}\n\nPlease refresh and try again.`;
+  }
+}
+
+// Show error on proctor page
+function showProctorError(message) {
+  const errorDiv = document.getElementById('proctorError');
+  if (errorDiv) {
+    errorDiv.innerHTML = `
+      <div style="background: #ffebee; border: 1px solid #f44336; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <div style="font-weight: bold; color: #c62828; margin-bottom: 10px;">📷 Camera Error</div>
+        <div style="white-space: pre-wrap; color: #333; font-size: 14px; line-height: 1.6;">${escapeHtmlProctor(message)}</div>
+        <button onclick="location.reload()" style="margin-top: 15px; background: #f44336; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">
+          Refresh & Try Again
+        </button>
+      </div>
+    `;
+    errorDiv.style.display = 'block';
+  } else {
+    alert(message);
+  }
+
+  // Re-enable the connect button
+  const submitBtn = document.querySelector('#proctorLoginForm button[type="submit"]');
+  if (submitBtn) {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Connect Proctor Camera';
+  }
+}
+
+// Escape HTML for proctor page
+function escapeHtmlProctor(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // Switch between front and back camera
