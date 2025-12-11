@@ -3,7 +3,8 @@ const { getSheets } = require('./google-auth');
 async function getStudentRecord(email, studentId) {
   try {
     const sheets = await getSheets();
-    const range = process.env.STUDENTS_SHEET_RANGE || 'Students!A:D';
+    // Extended range to support multiple permitted tests (columns C-G) and attempts (column H)
+    const range = process.env.STUDENTS_SHEET_RANGE || 'Students!A:H';
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
@@ -17,14 +18,34 @@ async function getStudentRecord(email, studentId) {
 
     // Skip header row, find matching student
     for (let i = 1; i < rows.length; i++) {
-      const [rowEmail, rowStudentId, permittedTest, attempts] = rows[i];
+      const row = rows[i];
+      const rowEmail = row[0];       // Column A: Email
+      const rowStudentId = row[1];   // Column B: Student_ID
+      // Columns C-G (indices 2-6): Permitted Tests
+      const permittedTest1 = row[2]; // Column C
+      const permittedTest2 = row[3]; // Column D
+      const permittedTest3 = row[4]; // Column E
+      const permittedTest4 = row[5]; // Column F
+      const permittedTest5 = row[6]; // Column G
+      const attempts = row[7];       // Column H: Attempt #
 
       if (rowEmail?.toLowerCase() === email.toLowerCase() &&
           rowStudentId === studentId) {
+
+        // Collect all non-empty permitted tests into an array
+        const permittedTests = [
+          permittedTest1,
+          permittedTest2,
+          permittedTest3,
+          permittedTest4,
+          permittedTest5
+        ].filter(test => test && test.trim() !== '');
+
         return {
           email: rowEmail,
           studentId: rowStudentId,
-          permittedTest: permittedTest,
+          permittedTests: permittedTests, // Array of permitted tests
+          permittedTest: permittedTests[0] || null, // Backward compatibility: first test
           attempts: attempts,
           rowIndex: i + 1 // 1-indexed for Google Sheets
         };
@@ -108,7 +129,8 @@ async function getAllTests() {
     }
 
     // Also get tests from Students sheet (tests that are assigned but maybe not configured yet)
-    const studentsRange = process.env.STUDENTS_SHEET_RANGE || 'Students!A:D';
+    // Scan columns C-G (indices 2-6) for permitted tests
+    const studentsRange = 'Students!A:H';
     try {
       const studentsResponse = await sheets.spreadsheets.values.get({
         spreadsheetId: process.env.GOOGLE_SHEET_ID,
@@ -117,11 +139,15 @@ async function getAllTests() {
 
       const studentRows = studentsResponse.data.values || [];
 
-      // Skip header, get unique test names
+      // Skip header, get unique test names from all permitted test columns (C-G)
       for (let i = 1; i < studentRows.length; i++) {
-        const [, , permittedTest] = studentRows[i];
-        if (permittedTest) {
-          allTests.add(permittedTest);
+        const row = studentRows[i];
+        // Check columns C through G (indices 2-6) for permitted tests
+        for (let col = 2; col <= 6; col++) {
+          const permittedTest = row[col];
+          if (permittedTest && permittedTest.trim() !== '') {
+            allTests.add(permittedTest);
+          }
         }
       }
     } catch (error) {
