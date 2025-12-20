@@ -301,8 +301,8 @@ async function proceedAfterTestSelection() {
 
     // Practice mode: Skip ALL proctoring (camera, screen share, proctor device)
     if (isPracticeMode) {
-      console.log('PRACTICE MODE: Skipping all proctoring, going directly to test instructions');
-      showPage('page5');
+      console.log('PRACTICE MODE: Skipping all proctoring, going to test instructions');
+      showPage('pageTestInstructions');
     } else {
       // Normal mode: Go to camera/mic setup
       showPage('page4');
