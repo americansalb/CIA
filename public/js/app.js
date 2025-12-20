@@ -2516,11 +2516,14 @@ function openPreSessionModal() {
       return;
     }
 
-    // Update title and description based on warmup vs test
+    // Update title and description based on warmup vs test vs practice mode
     const title = document.getElementById('preSessionTitle');
     const description = document.getElementById('preSessionDescription');
 
-    if (isWarmupMode) {
+    if (isPracticeMode) {
+      if (title) title.textContent = 'Practice Mode Pre-Session';
+      if (description) description.innerHTML = 'This is <strong>practice mode</strong> (not graded). Please perform both <strong>pre-session for patient and provider</strong> now.';
+    } else if (isWarmupMode) {
       if (title) title.textContent = 'Warmup Pre-Session';
       if (description) description.innerHTML = 'This is the <strong>practice warmup</strong>. Please perform both <strong>pre-session for patient and provider</strong> now.';
     } else {
