@@ -185,7 +185,8 @@ async function combineChunks(sessionFolderId, deviceType, studentEmail, studentI
     fs.writeFileSync(concatListPath, concatContent);
 
     // Step 4: Concatenate and convert to seekable MP4
-    console.log(`[${combineId}] Concatenating and converting to MP4...`);
+    console.log(`[${combineId}] Concatenating and converting to MP4 (${chunks.length} chunks)...`);
+    let lastLogTime = Date.now();
     await new Promise((resolve, reject) => {
       ffmpeg()
         .input(concatListPath)
@@ -202,11 +203,15 @@ async function combineChunks(sessionFolderId, deviceType, studentEmail, studentI
         ])
         .output(outputPath)
         .on('start', (cmd) => {
-          console.log(`[${combineId}] FFmpeg started: ${cmd}`);
+          console.log(`[${combineId}] FFmpeg started`);
         })
         .on('progress', (progress) => {
-          if (progress.percent) {
-            console.log(`[${combineId}] Progress: ${Math.round(progress.percent)}%`);
+          // Only log every 30 seconds to avoid spam (concat progress is unreliable)
+          const now = Date.now();
+          if (now - lastLogTime > 30000) {
+            lastLogTime = now;
+            const timemark = progress.timemark || 'processing';
+            console.log(`[${combineId}] Processing... timemark: ${timemark}`);
           }
         })
         .on('end', () => {
