@@ -193,8 +193,8 @@ async function combineChunks(sessionFolderId, deviceType, studentEmail, studentI
         .inputOptions(['-f concat', '-safe 0'])
         .outputOptions([
           '-c:v libx264',
-          '-preset fast',
-          '-crf 23',
+          '-preset ultrafast',  // Much faster encoding (larger file but way quicker)
+          '-crf 28',            // Slightly lower quality for speed
           '-c:a aac',
           '-b:a 128k',
           '-movflags +faststart',
