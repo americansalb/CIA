@@ -2,6 +2,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
 const path = require('path');
 const { downloadFile, uploadFile, deleteFile } = require('./drive-helper');
+const { getDrive } = require('./google-auth');
 
 // Ensure temp directory exists
 const TEMP_DIR = path.join(__dirname, '..', 'temp');
@@ -125,7 +126,164 @@ function queueConversion(webmFileId, sessionFolderId, originalFileName) {
   });
 }
 
+/**
+ * Combine chunks from an incomplete recording into a single video
+ * Downloads all chunks, concatenates them, converts to MP4, and uploads
+ */
+async function combineChunks(sessionFolderId, deviceType, studentEmail, studentId) {
+  const combineId = `combine_${Date.now()}`;
+  console.log(`[${combineId}] Starting chunk combination for ${deviceType} device`);
+
+  const workDir = path.join(TEMP_DIR, combineId);
+  fs.mkdirSync(workDir, { recursive: true });
+
+  const chunkFiles = [];
+  const concatListPath = path.join(workDir, 'concat_list.txt');
+  const outputPath = path.join(workDir, 'combined_output.mp4');
+
+  try {
+    // Step 1: Get all chunk files from the session folder
+    const drive = await getDrive();
+    const filesResponse = await drive.files.list({
+      q: `'${sessionFolderId}' in parents and name contains '${deviceType}_chunk_' and trashed=false`,
+      fields: 'files(id, name, createdTime)',
+      orderBy: 'name',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+
+    const chunks = filesResponse.data.files || [];
+    if (chunks.length === 0) {
+      return {
+        success: false,
+        error: `No ${deviceType} chunks found in session folder`,
+      };
+    }
+
+    // Sort chunks by chunk number (extract number from name like "main_chunk_001.webm")
+    chunks.sort((a, b) => {
+      const numA = parseInt(a.name.match(/chunk_(\d+)/)?.[1] || '0');
+      const numB = parseInt(b.name.match(/chunk_(\d+)/)?.[1] || '0');
+      return numA - numB;
+    });
+
+    console.log(`[${combineId}] Found ${chunks.length} chunks to combine`);
+
+    // Step 2: Download all chunks
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const chunkPath = path.join(workDir, `chunk_${String(i).padStart(4, '0')}.webm`);
+      console.log(`[${combineId}] Downloading chunk ${i + 1}/${chunks.length}: ${chunk.name}`);
+      await downloadFile(chunk.id, chunkPath);
+      chunkFiles.push(chunkPath);
+    }
+
+    console.log(`[${combineId}] All chunks downloaded, creating concat list...`);
+
+    // Step 3: Create concat list file for ffmpeg
+    const concatContent = chunkFiles.map(f => `file '${f}'`).join('\n');
+    fs.writeFileSync(concatListPath, concatContent);
+
+    // Step 4: Concatenate and convert to seekable MP4
+    console.log(`[${combineId}] Concatenating and converting to MP4...`);
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(concatListPath)
+        .inputOptions(['-f concat', '-safe 0'])
+        .outputOptions([
+          '-c:v libx264',
+          '-preset fast',
+          '-crf 23',
+          '-c:a aac',
+          '-b:a 128k',
+          '-movflags +faststart',
+          '-g 30',
+          '-keyint_min 30',
+        ])
+        .output(outputPath)
+        .on('start', (cmd) => {
+          console.log(`[${combineId}] FFmpeg started: ${cmd}`);
+        })
+        .on('progress', (progress) => {
+          if (progress.percent) {
+            console.log(`[${combineId}] Progress: ${Math.round(progress.percent)}%`);
+          }
+        })
+        .on('end', () => {
+          console.log(`[${combineId}] Concatenation complete`);
+          resolve();
+        })
+        .on('error', (err) => {
+          console.error(`[${combineId}] FFmpeg error:`, err);
+          reject(err);
+        })
+        .run();
+    });
+
+    // Step 5: Upload combined video to Google Drive
+    console.log(`[${combineId}] Uploading combined video...`);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const mp4FileName = `${studentEmail}_${studentId}_COMBINED_${deviceType}_${timestamp}.mp4`;
+    const uploadResult = await uploadFile(outputPath, mp4FileName, sessionFolderId, 'video/mp4');
+    console.log(`[${combineId}] ✓ Combined video uploaded: ${uploadResult.fileId}`);
+
+    // Step 6: Cleanup temp files
+    try {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    } catch (cleanupErr) {
+      console.warn(`[${combineId}] Cleanup warning:`, cleanupErr.message);
+    }
+
+    console.log(`[${combineId}] ✓ Chunk combination completed successfully`);
+    return {
+      success: true,
+      mp4FileId: uploadResult.fileId,
+      mp4FileName: mp4FileName,
+      webViewLink: uploadResult.webViewLink,
+      chunksProcessed: chunks.length,
+    };
+
+  } catch (error) {
+    console.error(`[${combineId}] ✗ Chunk combination failed:`, error);
+
+    // Cleanup on error
+    try {
+      if (fs.existsSync(workDir)) {
+        fs.rmSync(workDir, { recursive: true, force: true });
+      }
+    } catch (cleanupErr) {
+      // Ignore cleanup errors
+    }
+
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+}
+
+/**
+ * Queue chunk combination for background processing
+ */
+function queueChunkCombine(sessionFolderId, deviceType, studentEmail, studentId) {
+  setImmediate(() => {
+    combineChunks(sessionFolderId, deviceType, studentEmail, studentId)
+      .then((result) => {
+        if (result.success) {
+          console.log(`✓ Background chunk combination succeeded: ${result.mp4FileName}`);
+        } else {
+          console.error(`✗ Background chunk combination failed: ${result.error}`);
+        }
+      })
+      .catch((err) => {
+        console.error('✗ Background chunk combination error:', err);
+      });
+  });
+}
+
 module.exports = {
   convertToSeekableMp4,
   queueConversion,
+  combineChunks,
+  queueChunkCombine,
 };

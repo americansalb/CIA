@@ -195,6 +195,27 @@ function createRecordingCard(recording) {
           `).join('')}
         </div>
       ` : ''}
+      ${recording.chunkCount ? `
+        <div class="video-links" style="margin-top: 10px; background: #e3f2fd; padding: 10px; border-radius: 6px;">
+          <span style="color: #1565c0; font-size: 13px; display: block; margin-bottom: 8px;">🎬 Combine chunks into single video:</span>
+          ${recording.chunkCount.main > 0 ? `
+            <button
+              class="video-link combine-main-btn"
+              onclick="combineChunks('${recording.sessionFolderId}', 'main', '${recording.email}', '${recording.studentId}', this)"
+              style="background: #2196f3; font-size: 13px; padding: 8px 16px; margin-right: 8px;">
+              🔗 Combine Main (${recording.chunkCount.main} chunks)
+            </button>
+          ` : ''}
+          ${recording.chunkCount.proctor > 0 ? `
+            <button
+              class="video-link combine-proctor-btn"
+              onclick="combineChunks('${recording.sessionFolderId}', 'proctor', '${recording.email}', '${recording.studentId}', this)"
+              style="background: #2196f3; font-size: 13px; padding: 8px 16px;">
+              🔗 Combine Proctor (${recording.chunkCount.proctor} chunks)
+            </button>
+          ` : ''}
+        </div>
+      ` : ''}
 
       ${interventionsList}
 
@@ -262,6 +283,48 @@ async function convertVideo(fileId, folderId, fileName, button) {
     }, 3000);
 
     alert('Conversion failed: ' + error.message);
+  }
+}
+
+async function combineChunks(sessionFolderId, deviceType, email, studentId, button) {
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = '⏳ Combining...';
+  button.style.background = '#6c757d';
+
+  try {
+    const response = await fetch('/api/combine-chunks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionFolderId, deviceType, email, studentId }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      button.textContent = '✓ Queued!';
+      button.style.background = '#28a745';
+
+      // Show success message
+      setTimeout(() => {
+        button.textContent = '✓ Combining in background';
+        button.style.opacity = '0.7';
+      }, 1500);
+    } else {
+      throw new Error(result.message);
+    }
+  } catch (error) {
+    console.error('Combine chunks error:', error);
+    button.textContent = '✗ Failed';
+    button.style.background = '#dc3545';
+
+    setTimeout(() => {
+      button.disabled = false;
+      button.textContent = originalText;
+      button.style.background = '#2196f3';
+    }, 3000);
+
+    alert('Combine chunks failed: ' + error.message);
   }
 }
 

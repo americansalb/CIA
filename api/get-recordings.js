@@ -104,6 +104,7 @@ module.exports = async (req, res) => {
             status: 'incomplete',
             studentFolder: studentFolder.name,
             sessionFolder: sessionFolder.name,
+            sessionFolderId: sessionFolder.id,
             chunkCount: {
               main: mainChunks.length,
               proctor: proctorChunks.length,
