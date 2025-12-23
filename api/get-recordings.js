@@ -50,15 +50,29 @@ module.exports = async (req, res) => {
 
           const metadata = metadataResponse.data;
 
+          // Check which videos have been converted (have CONVERTED in name)
+          const convertedFiles = videoFiles.filter(f => f.name.includes('_CONVERTED_'));
+          const unconvertedWebms = videoFiles.filter(f =>
+            f.name.endsWith('.webm') &&
+            !f.name.includes('_CONVERTED_') &&
+            // Check if there's no corresponding converted version
+            !convertedFiles.some(cf =>
+              cf.name.replace('_CONVERTED_', '_').replace('.mp4', '.webm') === f.name
+            )
+          );
+
           recordings.push({
             ...metadata,
             studentFolder: studentFolder.name,
             sessionFolder: sessionFolder.name,
+            sessionFolderId: sessionFolder.id,
             videos: videoFiles.map(v => ({
               fileId: v.id,
               fileName: v.name,
               webViewLink: v.webViewLink,
+              mimeType: v.mimeType,
               deviceType: v.name.includes('_main_') ? 'main' : 'proctor',
+              needsConversion: unconvertedWebms.some(u => u.id === v.id),
             })),
           });
         } else if (chunkFiles.length > 0) {

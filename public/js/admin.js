@@ -182,6 +182,19 @@ function createRecordingCard(recording) {
         ${mainVideo ? `<a href="${mainVideo.webViewLink}" target="_blank" class="video-link" style="background: #6c757d; font-size: 13px; padding: 8px 16px;">📂 Main on Drive</a>` : ''}
         ${proctorVideo ? `<a href="${proctorVideo.webViewLink}" target="_blank" class="video-link" style="background: #6c757d; font-size: 13px; padding: 8px 16px;">📂 Proctor on Drive</a>` : ''}
       </div>
+      ${recording.videos.some(v => v.needsConversion) ? `
+        <div class="video-links" style="margin-top: 10px; background: #fff3cd; padding: 10px; border-radius: 6px;">
+          <span style="color: #856404; font-size: 13px; margin-right: 10px;">⚠️ WebM needs conversion for smooth playback:</span>
+          ${recording.videos.filter(v => v.needsConversion).map(v => `
+            <button
+              class="video-link convert-btn-${v.fileId}"
+              onclick="convertVideo('${v.fileId}', '${recording.sessionFolderId}', '${v.fileName}', this)"
+              style="background: #ff9800; font-size: 13px; padding: 8px 16px;">
+              🔄 Convert ${v.deviceType}
+            </button>
+          `).join('')}
+        </div>
+      ` : ''}
 
       ${interventionsList}
 
@@ -208,6 +221,48 @@ function createRecordingCard(recording) {
       </div>
     </div>
   `;
+}
+
+async function convertVideo(fileId, folderId, fileName, button) {
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = '⏳ Converting...';
+  button.style.background = '#6c757d';
+
+  try {
+    const response = await fetch('/api/convert-video', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileId, folderId, fileName }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      button.textContent = '✓ Queued!';
+      button.style.background = '#28a745';
+
+      // Show success message
+      setTimeout(() => {
+        button.textContent = '✓ Converting in background';
+        button.style.opacity = '0.7';
+      }, 1500);
+    } else {
+      throw new Error(result.message);
+    }
+  } catch (error) {
+    console.error('Conversion error:', error);
+    button.textContent = '✗ Failed';
+    button.style.background = '#dc3545';
+
+    setTimeout(() => {
+      button.disabled = false;
+      button.textContent = originalText;
+      button.style.background = '#ff9800';
+    }, 3000);
+
+    alert('Conversion failed: ' + error.message);
+  }
 }
 
 async function submitGrade(event, sessionId) {
