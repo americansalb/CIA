@@ -76,6 +76,9 @@ module.exports = async (req, res) => {
       // Clean up temp file
       fs.unlinkSync(videoFile[0].filepath);
 
+      // Log successful final upload
+      console.log(`✓ FINAL video uploaded: ${session.email} | ${deviceType[0]} | duration: ${duration ? duration[0] : 'unknown'}s | fileId: ${uploadResult.fileId}`);
+
       res.json({
         success: true,
         message: 'Final video uploaded successfully',
