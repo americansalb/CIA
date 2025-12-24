@@ -175,8 +175,11 @@ function createRecordingCard(recording) {
       </div>
 
       <div class="video-links">
-        ${mainVideo ? `<button class="video-link" onclick="openVideoPlayer('${recording.sessionId}', 'main', '${recording.email}')">▶️ View Main Camera</button>` : ''}
-        ${proctorVideo ? `<button class="video-link" onclick="openVideoPlayer('${recording.sessionId}', 'proctor', '${recording.email}')">▶️ View Proctor Camera</button>` : ''}
+        <button class="video-link" onclick="openMultiView('${recording.sessionId}', '${recording.email}')" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+          🎬 View All Cameras
+        </button>
+        ${mainVideo ? `<button class="video-link" onclick="openVideoPlayer('${recording.sessionId}', 'main', '${recording.email}')" style="background: #5c6bc0;">▶️ Main Only</button>` : ''}
+        ${proctorVideo ? `<button class="video-link" onclick="openVideoPlayer('${recording.sessionId}', 'proctor', '${recording.email}')" style="background: #26a69a;">▶️ Proctor Only</button>` : ''}
       </div>
       <div class="video-links" style="margin-top: 10px;">
         ${mainVideo ? `<a href="${mainVideo.webViewLink}" target="_blank" class="video-link" style="background: #6c757d; font-size: 13px; padding: 8px 16px;">📂 Main on Drive</a>` : ''}
@@ -837,6 +840,167 @@ function closeLiveStream() {
 
 // Ensure switchTab is globally accessible
 window.switchTab = switchTab;
+
+// ====================
+// MULTI-VIEW VIDEO PLAYER
+// ====================
+
+let multiViewData = {
+  sessionId: null,
+  email: null,
+  videos: { main: null, proctor: null, screen: null },
+  currentSpotlight: 'main'
+};
+
+async function openMultiView(sessionId, email) {
+  multiViewData.sessionId = sessionId;
+  multiViewData.email = email;
+  multiViewData.currentSpotlight = 'main';
+
+  const modal = document.getElementById('multiViewModal');
+  const title = document.getElementById('multiViewTitle');
+  const grid = document.getElementById('multiViewGrid');
+
+  title.textContent = `Multi-View: ${email}`;
+  modal.classList.add('active');
+
+  // Reset grid layout
+  grid.className = '';
+
+  // Show loading state
+  ['Main', 'Proctor', 'Screen'].forEach(type => {
+    const box = document.getElementById(`mv${type}`);
+    box.classList.add('loading');
+    box.classList.remove('spotlight');
+  });
+
+  // Fetch chunks for each device type
+  const deviceTypes = ['main', 'proctor', 'screen'];
+
+  for (const deviceType of deviceTypes) {
+    try {
+      const response = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
+      const result = await response.json();
+
+      const boxId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`;
+      const videoId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}Video`;
+      const box = document.getElementById(boxId);
+      const video = document.getElementById(videoId);
+
+      if (result.success && result.chunks && result.chunks.length > 0) {
+        // Use the first chunk or combined video
+        const firstChunk = result.chunks[0];
+        video.src = firstChunk.downloadUrl;
+        video.load();
+        multiViewData.videos[deviceType] = video;
+
+        video.onloadeddata = () => {
+          box.classList.remove('loading');
+        };
+
+        video.onerror = () => {
+          box.classList.remove('loading');
+          console.error(`Failed to load ${deviceType} video`);
+        };
+      } else {
+        // No video for this device type
+        box.classList.remove('loading');
+        video.src = '';
+        const label = box.querySelector('.mv-label');
+        label.textContent += ' (No recording)';
+      }
+    } catch (error) {
+      console.error(`Error loading ${deviceType} video:`, error);
+      const boxId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`;
+      document.getElementById(boxId).classList.remove('loading');
+    }
+  }
+
+  // Set initial spotlight
+  spotlightVideo('main');
+}
+
+function spotlightVideo(deviceType) {
+  const grid = document.getElementById('multiViewGrid');
+
+  // Remove all spotlight classes
+  grid.className = '';
+  document.querySelectorAll('.mv-video-box').forEach(box => box.classList.remove('spotlight'));
+
+  // Add spotlight class
+  grid.classList.add(`spotlight-${deviceType}`);
+  const boxId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`;
+  document.getElementById(boxId).classList.add('spotlight');
+
+  multiViewData.currentSpotlight = deviceType;
+}
+
+function syncAllVideos() {
+  // Get the current time of the spotlight video
+  const spotlightVideo = multiViewData.videos[multiViewData.currentSpotlight];
+  if (!spotlightVideo) return;
+
+  const currentTime = spotlightVideo.currentTime;
+
+  // Sync all other videos to this time
+  Object.values(multiViewData.videos).forEach(video => {
+    if (video && video !== spotlightVideo) {
+      video.currentTime = currentTime;
+    }
+  });
+
+  console.log(`Synced all videos to ${currentTime.toFixed(1)}s`);
+}
+
+function playAllVideos() {
+  Object.values(multiViewData.videos).forEach(video => {
+    if (video) {
+      video.play().catch(err => console.log('Play failed:', err));
+    }
+  });
+}
+
+function pauseAllVideos() {
+  Object.values(multiViewData.videos).forEach(video => {
+    if (video) {
+      video.pause();
+    }
+  });
+}
+
+function closeMultiView() {
+  const modal = document.getElementById('multiViewModal');
+  modal.classList.remove('active');
+
+  // Stop all videos
+  Object.values(multiViewData.videos).forEach(video => {
+    if (video) {
+      video.pause();
+      video.src = '';
+    }
+  });
+
+  multiViewData = {
+    sessionId: null,
+    email: null,
+    videos: { main: null, proctor: null, screen: null },
+    currentSpotlight: 'main'
+  };
+}
+
+// Update time display
+setInterval(() => {
+  const modal = document.getElementById('multiViewModal');
+  if (modal.classList.contains('active')) {
+    const video = multiViewData.videos[multiViewData.currentSpotlight];
+    if (video && !isNaN(video.currentTime)) {
+      const time = video.currentTime;
+      const mins = Math.floor(time / 60);
+      const secs = Math.floor(time % 60);
+      document.getElementById('mvTimeDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+  }
+}, 500);
 
 // Verification log at end of script
 console.log('[Admin] Script fully loaded');
