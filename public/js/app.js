@@ -5,6 +5,7 @@ let mainRecorder = null;
 let screenRecorder = null;
 let proctorRecorder = null;
 let interventionRecorder = null;
+let audioRecorder = null; // Separate high-quality audio recording
 let mainStream = null;
 let screenStream = null;
 let testStartTime = null;
@@ -971,7 +972,7 @@ async function requestScreenShareAndContinue() {
           cursor: 'always',
           displaySurface: 'monitor', // Prefer entire screen
         },
-        audio: false,
+        audio: true, // Capture system audio from screen
         preferCurrentTab: false, // Don't allow tab sharing
       });
 
@@ -1085,6 +1086,16 @@ showPage = async function(pageId) {
         } catch (error) {
           console.error('Screen recording error:', error);
         }
+      }
+
+      // Initialize separate audio-only recording (mic + screen audio mixed)
+      try {
+        audioRecorder = new AudioRecordingManager(sessionData.sessionId);
+        await audioRecorder.startRecording(mainStream, screenStream);
+        console.log('Audio-only recording started');
+      } catch (error) {
+        console.error('Audio recording error:', error);
+        // Continue without audio-only recording
       }
 
       // Start continuous quality monitoring during test
@@ -1666,6 +1677,9 @@ async function submitTest() {
     if (screenRecorder) {
       await screenRecorder.stopRecording();
     }
+    if (audioRecorder) {
+      await audioRecorder.stopRecording();
+    }
 
     // Navigate to completion page
     showPage('page6');
@@ -1827,6 +1841,12 @@ async function endTest(reason = 'Test completed') {
     await screenRecorder.stopRecording();
     await screenRecorder.uploadFinalVideo(0);
     screenRecorder.stopStream();
+  }
+
+  // Stop audio-only recording
+  if (audioRecorder) {
+    await audioRecorder.stopRecording();
+    audioRecorder.stopStream();
   }
 
   // Stop screen stream

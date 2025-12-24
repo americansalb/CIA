@@ -220,9 +220,9 @@ class RecordingManager {
     await recordingBackup.init();
 
     try {
-      // ADAPTIVE BITRATE: Detect connection speed and adjust quality
-      let videoBitsPerSecond = 2000000; // 2 Mbps default - smooth HD video
-      let audioBitsPerSecond = 192000; // 192 kbps - excellent audio for transcription
+      // LOW QUALITY VIDEO: Prioritize small file size, audio is recorded separately
+      let videoBitsPerSecond = 500000; // 500 kbps - low quality video (audio captured separately)
+      let audioBitsPerSecond = 128000; // 128 kbps - decent audio in video (backup)
 
       // Check network connection (if available)
       const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
@@ -230,14 +230,14 @@ class RecordingManager {
         const effectiveType = connection.effectiveType;
         console.log(`[${this.deviceType}] Detected connection: ${effectiveType}`);
 
-        // Adaptive bitrate based on connection
+        // Adaptive bitrate based on connection (all reduced for smaller files)
         if (effectiveType === '4g') {
-          videoBitsPerSecond = 2000000; // 2 Mbps - full quality
+          videoBitsPerSecond = 500000; // 500 kbps - standard low quality
         } else if (effectiveType === '3g') {
-          videoBitsPerSecond = 800000; // 800 kbps - reduced quality
+          videoBitsPerSecond = 300000; // 300 kbps - reduced quality
           console.warn(`[${this.deviceType}] Reducing quality for 3G connection`);
         } else if (effectiveType === '2g' || effectiveType === 'slow-2g') {
-          videoBitsPerSecond = 400000; // 400 kbps - minimal quality
+          videoBitsPerSecond = 200000; // 200 kbps - minimal quality
           console.warn(`[${this.deviceType}] Using minimal quality for slow connection`);
         }
       }
@@ -760,6 +760,178 @@ class RecordingManager {
   stopStream() {
     if (this.stream) {
       this.stream.getTracks().forEach(track => track.stop());
+    }
+  }
+}
+
+// Audio-only recorder for high quality audio capture
+class AudioRecordingManager {
+  constructor(sessionId) {
+    this.sessionId = sessionId;
+    this.mediaRecorder = null;
+    this.audioStream = null;
+    this.chunks = [];
+    this.chunkNumber = 0;
+    this.isRecording = false;
+    this.chunkInterval = null;
+    this.startTime = null;
+  }
+
+  async startRecording(micStream, screenStream = null) {
+    this.startTime = Date.now();
+
+    try {
+      // Create AudioContext to mix audio sources
+      const audioContext = new AudioContext();
+      const destination = audioContext.createMediaStreamDestination();
+
+      // Add microphone audio
+      if (micStream) {
+        const micTracks = micStream.getAudioTracks();
+        if (micTracks.length > 0) {
+          const micSource = audioContext.createMediaStreamSource(new MediaStream(micTracks));
+          micSource.connect(destination);
+          console.log('[Audio] Microphone audio connected');
+        }
+      }
+
+      // Add screen share audio (if available)
+      if (screenStream) {
+        const screenAudioTracks = screenStream.getAudioTracks();
+        if (screenAudioTracks.length > 0) {
+          const screenSource = audioContext.createMediaStreamSource(new MediaStream(screenAudioTracks));
+          screenSource.connect(destination);
+          console.log('[Audio] Screen audio connected');
+        } else {
+          console.log('[Audio] No screen audio available (user may not have shared audio)');
+        }
+      }
+
+      this.audioStream = destination.stream;
+
+      // High quality audio-only recording
+      let options = {
+        audioBitsPerSecond: 192000, // 192 kbps - high quality for transcription
+      };
+
+      // Try audio formats
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        options.mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        options.mimeType = 'audio/webm';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        options.mimeType = 'audio/mp4';
+      } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+        options.mimeType = 'audio/ogg';
+      }
+
+      this.mediaRecorder = new MediaRecorder(this.audioStream, options);
+      console.log(`[Audio] Recording with format: ${options.mimeType || 'default'}`);
+
+      this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          this.chunks.push(event.data);
+        }
+      };
+
+      this.mediaRecorder.onstop = async () => {
+        if (this.chunks.length > 0) {
+          await this.uploadChunk();
+        }
+      };
+
+      // Start recording with 1-second chunks
+      this.mediaRecorder.start(1000);
+      this.isRecording = true;
+
+      // Upload every 30 seconds (same as video)
+      this.chunkInterval = setInterval(() => {
+        if (this.isRecording) {
+          this.stopAndUploadChunk();
+        }
+      }, 30000);
+
+      console.log('[Audio] Recording started');
+    } catch (error) {
+      console.error('[Audio] Failed to start recording:', error);
+      throw error;
+    }
+  }
+
+  stopAndUploadChunk() {
+    if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+      this.mediaRecorder.stop();
+
+      // Restart recording after a brief delay
+      setTimeout(() => {
+        if (this.isRecording && this.audioStream) {
+          this.mediaRecorder.start(1000);
+        }
+      }, 100);
+    }
+  }
+
+  async uploadChunk() {
+    if (this.chunks.length === 0) return;
+
+    const blob = new Blob(this.chunks, { type: this.mediaRecorder?.mimeType || 'audio/webm' });
+    this.chunks = [];
+    this.chunkNumber++;
+
+    const formData = new FormData();
+
+    // Determine file extension
+    let extension = 'webm';
+    if (this.mediaRecorder?.mimeType?.includes('mp4')) extension = 'm4a';
+    else if (this.mediaRecorder?.mimeType?.includes('ogg')) extension = 'ogg';
+
+    formData.append('chunk', blob, `audio_chunk_${String(this.chunkNumber).padStart(3, '0')}.${extension}`);
+    formData.append('sessionId', this.sessionId);
+    formData.append('deviceType', 'audio'); // Special type for audio-only
+    formData.append('chunkNumber', this.chunkNumber);
+
+    try {
+      const response = await fetch('/api/upload-chunk', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (response.ok) {
+        console.log(`[Audio] Chunk ${this.chunkNumber} uploaded`);
+      } else {
+        console.error(`[Audio] Chunk ${this.chunkNumber} upload failed`);
+      }
+    } catch (error) {
+      console.error(`[Audio] Upload error:`, error);
+    }
+  }
+
+  async stopRecording() {
+    this.isRecording = false;
+
+    if (this.chunkInterval) {
+      clearInterval(this.chunkInterval);
+      this.chunkInterval = null;
+    }
+
+    return new Promise((resolve) => {
+      if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+        this.mediaRecorder.onstop = async () => {
+          if (this.chunks.length > 0) {
+            await this.uploadChunk();
+          }
+          resolve();
+        };
+        this.mediaRecorder.stop();
+      } else {
+        resolve();
+      }
+    });
+  }
+
+  stopStream() {
+    if (this.audioStream) {
+      this.audioStream.getTracks().forEach(track => track.stop());
     }
   }
 }
