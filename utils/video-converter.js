@@ -190,16 +190,21 @@ async function combineChunks(sessionFolderId, deviceType, studentEmail, studentI
     await new Promise((resolve, reject) => {
       ffmpeg()
         .input(concatListPath)
-        .inputOptions(['-f concat', '-safe 0'])
+        .inputOptions([
+          '-f concat',
+          '-safe 0',
+          '-fflags +genpts',  // Generate new timestamps to fix freezing
+        ])
         .outputOptions([
           '-c:v libx264',
-          '-preset ultrafast',  // Much faster encoding (larger file but way quicker)
-          '-crf 28',            // Slightly lower quality for speed
+          '-preset ultrafast',
+          '-crf 28',
           '-c:a aac',
           '-b:a 128k',
           '-movflags +faststart',
-          '-g 30',
-          '-keyint_min 30',
+          '-vsync cfr',        // Constant frame rate - fixes timing issues
+          '-r 30',             // Force 30fps output
+          '-avoid_negative_ts make_zero',  // Fix negative timestamps
         ])
         .output(outputPath)
         .on('start', (cmd) => {

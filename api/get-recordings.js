@@ -86,10 +86,24 @@ module.exports = async (req, res) => {
           const mainChunks = chunkFiles.filter(f => f.name.includes('main_chunk_'));
           const proctorChunks = chunkFiles.filter(f => f.name.includes('proctor_chunk_'));
 
+          // Check for COMBINED videos (already processed)
+          const combinedVideos = files.filter(f => f.name.includes('COMBINED_'));
+          const hasCombinedMain = combinedVideos.some(f => f.name.includes('COMBINED_main'));
+          const hasCombinedProctor = combinedVideos.some(f => f.name.includes('COMBINED_proctor'));
+
           // Get first chunk upload time as proxy for session start
           const earliestChunk = chunkFiles.sort((a, b) =>
             new Date(a.createdTime) - new Date(b.createdTime)
           )[0];
+
+          // Only show chunkCount for uncombined device types
+          const chunkCount = {};
+          if (mainChunks.length > 0 && !hasCombinedMain) {
+            chunkCount.main = mainChunks.length;
+          }
+          if (proctorChunks.length > 0 && !hasCombinedProctor) {
+            chunkCount.proctor = proctorChunks.length;
+          }
 
           // Create synthetic metadata for incomplete session
           recordings.push({
@@ -105,19 +119,24 @@ module.exports = async (req, res) => {
             studentFolder: studentFolder.name,
             sessionFolder: sessionFolder.name,
             sessionFolderId: sessionFolder.id,
-            chunkCount: {
-              main: mainChunks.length,
-              proctor: proctorChunks.length,
-            },
+            chunkCount: Object.keys(chunkCount).length > 0 ? chunkCount : null,
             videos: [
-              // Mark as having chunks available for viewing
-              ...(mainChunks.length > 0 ? [{
+              // Show combined videos if available
+              ...combinedVideos.map(v => ({
+                fileId: v.id,
+                fileName: v.name,
+                webViewLink: v.webViewLink,
+                deviceType: v.name.includes('_main') ? 'main' : 'proctor',
+                isCombined: true,
+              })),
+              // Mark as having chunks available for viewing (only if not combined)
+              ...(mainChunks.length > 0 && !hasCombinedMain ? [{
                 fileId: 'chunks',
                 fileName: `${mainChunks.length} chunks`,
                 webViewLink: null,
                 deviceType: 'main',
               }] : []),
-              ...(proctorChunks.length > 0 ? [{
+              ...(proctorChunks.length > 0 && !hasCombinedProctor ? [{
                 fileId: 'chunks',
                 fileName: `${proctorChunks.length} chunks`,
                 webViewLink: null,

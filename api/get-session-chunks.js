@@ -45,7 +45,36 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Get all chunk files for this session and device
+    // First, check for COMBINED or FINAL videos (these take priority)
+    const combinedResponse = await drive.files.list({
+      q: `'${sessionFolderId}' in parents and (name contains 'COMBINED_${deviceType}' or name contains 'FINAL_${deviceType}') and trashed=false`,
+      fields: 'files(id, name, webContentLink, webViewLink, mimeType, createdTime)',
+      orderBy: 'createdTime desc',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+
+    const combinedVideos = combinedResponse.data.files || [];
+
+    if (combinedVideos.length > 0) {
+      // Return the most recent combined/final video
+      const video = combinedVideos[0];
+      console.log(`[get-session-chunks] Found combined video: ${video.name}`);
+      return res.json({
+        success: true,
+        hasCombinedVideo: true,
+        chunks: [{
+          fileId: video.id,
+          fileName: video.name,
+          chunkNumber: 0,
+          downloadUrl: `/api/stream-chunk?fileId=${video.id}`,
+          mimeType: video.mimeType,
+          isCombined: true,
+        }],
+      });
+    }
+
+    // No combined video, get all chunk files for this session and device
     const filesResponse = await drive.files.list({
       q: `'${sessionFolderId}' in parents and name contains '${deviceType}_chunk_' and trashed=false`,
       fields: 'files(id, name, webContentLink, webViewLink, mimeType)',
@@ -97,6 +126,7 @@ module.exports = async (req, res) => {
 
     res.json({
       success: true,
+      hasCombinedVideo: false,
       chunks: chunksWithUrls,
     });
   } catch (error) {
