@@ -532,28 +532,33 @@ async function requestPermissions() {
       analyser.getByteFrequencyData(dataArray);
       const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
 
-      const micLevelEl = document.getElementById('micLevel');
-      if (micLevelEl) {
-        micLevelEl.textContent = average > 5 ? '✓ Working' : 'Speak to test...';
+      const micStatusEl = document.getElementById('micStatus');
+
+      if (average > 5) {
+        // Sound detected - mic is working
+        if (!micWorking) {
+          micWorking = true;
+          if (micStatusEl) {
+            micStatusEl.innerHTML = '<span style="color: #4caf50;">✓ Microphone working</span>';
+          }
+          checkIfReadyToContinue();
+        }
+      } else {
+        // No sound - show prompt with audio level bar
+        if (micStatusEl && !micWorking) {
+          const barWidth = Math.min(average * 10, 100);
+          micStatusEl.innerHTML = `
+            <span style="color: #ff9800;">Say "testing" into your microphone</span>
+            <div style="background: #eee; height: 8px; border-radius: 4px; margin-top: 5px; width: 150px;">
+              <div style="background: #4caf50; height: 100%; border-radius: 4px; width: ${barWidth}%; transition: width 0.1s;"></div>
+            </div>
+          `;
+        }
       }
 
-      if (average > 5 && !micWorking) {
-        micWorking = true;
-        const micStatusEl = document.getElementById('micStatus');
-        if (micStatusEl) {
-          micStatusEl.innerHTML = '<span style="color: #4caf50;">✓ Microphone is working</span>';
-        }
-        checkIfReadyToContinue();
-      } else if (!micWorking && checkCount < maxChecks) {
+      // Keep checking until mic works
+      if (!micWorking) {
         requestAnimationFrame(checkAudio);
-      } else if (!micWorking) {
-        // Microphone permission granted but no sound detected - it's ready
-        const micStatusEl = document.getElementById('micStatus');
-        if (micStatusEl) {
-          micStatusEl.innerHTML = '<span style="color: #4caf50;">✓ Microphone ready</span>';
-        }
-        micWorking = true;
-        checkIfReadyToContinue();
       }
     }
 
