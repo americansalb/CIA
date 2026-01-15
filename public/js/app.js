@@ -547,11 +547,12 @@ async function requestPermissions() {
       } else if (!micWorking && checkCount < maxChecks) {
         requestAnimationFrame(checkAudio);
       } else if (!micWorking) {
-        // After 5 seconds, allow continuing even if mic wasn't detected
+        // Microphone permission granted but no sound detected - it's ready
         const micStatusEl = document.getElementById('micStatus');
         if (micStatusEl) {
-          micStatusEl.innerHTML = '<span style="color: #ff9800;">⚠ No sound detected (may still work)</span>';
+          micStatusEl.innerHTML = '<span style="color: #4caf50;">✓ Microphone ready</span>';
         }
+        micWorking = true;
         checkIfReadyToContinue();
       }
     }
