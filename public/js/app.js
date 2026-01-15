@@ -967,14 +967,27 @@ async function requestScreenShareAndContinue() {
 
   while (attempts < maxAttempts) {
     try {
-      screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          cursor: 'always',
-          displaySurface: 'monitor', // Prefer entire screen
-        },
-        audio: true, // Capture system audio from screen
-        preferCurrentTab: false, // Don't allow tab sharing
-      });
+      // Try with audio first, fall back to no audio if it fails (macOS Chrome issue)
+      try {
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            cursor: 'always',
+            displaySurface: 'monitor',
+          },
+          audio: true,
+          preferCurrentTab: false,
+        });
+      } catch (audioError) {
+        console.log('Screen share with audio failed, retrying without:', audioError.message);
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            cursor: 'always',
+            displaySurface: 'monitor',
+          },
+          audio: false,
+          preferCurrentTab: false,
+        });
+      }
 
       // CRITICAL: Validate they actually shared entire screen, not just a window/tab
       const videoTrack = screenStream.getVideoTracks()[0];
