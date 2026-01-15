@@ -1033,6 +1033,33 @@ async function requestScreenShareAndContinue() {
           return;
         }
         continue;
+      } else if (error.message.includes('Could not start video source')) {
+        // This error occurs when OS-level permission is missing
+        const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+        const isWindows = navigator.platform.toUpperCase().indexOf('WIN') >= 0;
+
+        let instructions = '';
+        if (isMac) {
+          instructions = 'On Mac:\n' +
+            '1. Open System Settings → Privacy & Security → Screen Recording\n' +
+            '2. Enable screen recording for your browser (Chrome/Safari/Firefox)\n' +
+            '3. You may need to RESTART your browser after enabling\n' +
+            '4. Then refresh this page and try again';
+        } else if (isWindows) {
+          instructions = 'On Windows:\n' +
+            '1. Close any other apps that might be using screen capture\n' +
+            '2. Make sure no other video calls are active\n' +
+            '3. Try restarting your browser\n' +
+            '4. If using Windows 10/11, check that screen capture permissions are enabled in Settings';
+        } else {
+          instructions = 'Please check:\n' +
+            '1. Your browser has permission to capture the screen\n' +
+            '2. No other apps are using screen capture\n' +
+            '3. Try restarting your browser';
+        }
+
+        alert('Screen sharing failed: Could not access screen.\n\n' + instructions);
+        return;
       } else {
         // Other error
         alert('Failed to access screen sharing: ' + error.message);
