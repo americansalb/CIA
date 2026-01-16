@@ -137,6 +137,59 @@ async function updateSession(sessionId, updates) {
   }
 }
 
+// Practice attempt logging
+const PRACTICE_PREFIX = 'practice:';
+const PRACTICE_LIST_KEY = 'practice_attempts';
+const PRACTICE_EXPIRY = 604800; // 7 days in seconds
+
+/**
+ * Log a practice mode attempt
+ * @param {object} attemptData - Practice attempt data
+ */
+async function logPracticeAttempt(attemptData) {
+  if (!isConnected) return;
+  try {
+    const attempt = {
+      ...attemptData,
+      timestamp: new Date().toISOString(),
+      id: `practice_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    };
+
+    // Store individual attempt with expiry
+    await client.setEx(
+      `${PRACTICE_PREFIX}${attempt.id}`,
+      PRACTICE_EXPIRY,
+      JSON.stringify(attempt)
+    );
+
+    // Also add to list for easy retrieval
+    await client.lPush(PRACTICE_LIST_KEY, JSON.stringify(attempt));
+    // Trim list to last 1000 attempts
+    await client.lTrim(PRACTICE_LIST_KEY, 0, 999);
+
+    return attempt;
+  } catch (error) {
+    console.error('Error logging practice attempt:', error);
+    return null;
+  }
+}
+
+/**
+ * Get all practice attempts
+ * @param {number} limit - Maximum number of attempts to return
+ * @returns {array} Array of practice attempts
+ */
+async function getPracticeAttempts(limit = 100) {
+  if (!isConnected) return [];
+  try {
+    const attempts = await client.lRange(PRACTICE_LIST_KEY, 0, limit - 1);
+    return attempts.map(a => JSON.parse(a));
+  } catch (error) {
+    console.error('Error getting practice attempts:', error);
+    return [];
+  }
+}
+
 module.exports = {
   client,
   setSession,
@@ -144,5 +197,7 @@ module.exports = {
   hasSession,
   deleteSession,
   getAllSessions,
-  updateSession
+  updateSession,
+  logPracticeAttempt,
+  getPracticeAttempts
 };

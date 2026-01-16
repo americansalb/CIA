@@ -761,40 +761,21 @@
 
       <!-- Recordings Tab -->
       <div id="recordingsTab" class="tab-content active">
-        <!-- Search and Filters -->
-        <div class="filter-bar" style="flex-wrap: wrap; gap: 10px;">
-          <input type="text" id="searchInput" placeholder="Search by email or student ID..."
-            oninput="filterRecordings()"
-            style="flex: 1; min-width: 200px; padding: 10px 15px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px;">
-
-          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">
-              All <span id="countAll" class="filter-count">0</span>
-            </button>
-            <button class="filter-btn" data-filter="pending_review" onclick="setFilter('pending_review')">
-              Pending <span id="countPending" class="filter-count">0</span>
-            </button>
-            <button class="filter-btn" data-filter="incomplete" onclick="setFilter('incomplete')">
-              Incomplete <span id="countIncomplete" class="filter-count">0</span>
-            </button>
-            <button class="filter-btn" data-filter="graded" onclick="setFilter('graded')">
-              Graded <span id="countGraded" class="filter-count">0</span>
-            </button>
-          </div>
-
-          <select id="sortFilter" onchange="filterRecordings()" style="padding: 10px; border-radius: 6px;">
-            <option value="newest">Newest First</option>
-            <option value="oldest">Oldest First</option>
+        <!-- Simple compact filter bar -->
+        <div style="background: white; padding: 10px 15px; border-radius: 8px; margin-bottom: 10px; display: flex; gap: 10px; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+          <input type="text" id="searchInput" placeholder="Search..." oninput="filterRecordings()"
+            style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px;">
+          <select id="sortFilter" onchange="filterRecordings()" style="padding: 8px; border-radius: 4px; border: 1px solid #ddd;">
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
           </select>
-
-          <button onclick="loadRecordings()" style="padding: 10px 15px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer;">
-            🔄 Refresh
-          </button>
+          <button onclick="loadRecordings()" style="padding: 8px 12px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">Refresh</button>
+          <span id="totalCount" style="color: #666; font-size: 13px;">0 attempts</span>
         </div>
 
-        <!-- Recordings Table -->
-        <div id="recordingsContainer" class="recordings-table-container">
-          <div class="loading-spinner"></div>
+        <!-- Compact Recordings Table -->
+        <div id="recordingsContainer" style="background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden;">
+          <div style="text-align: center; padding: 40px; color: #999;">Loading...</div>
         </div>
       </div>
 

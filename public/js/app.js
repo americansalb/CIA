@@ -36,6 +36,28 @@ const TEST_CONFIGS = {
   // Add more test variants...
 };
 
+// Log practice mode attempts for admin visibility
+async function logPracticeAttempt(action) {
+  if (!studentData) return;
+
+  try {
+    await fetch('/api/log-practice-attempt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: studentData.email,
+        studentId: studentData.studentId,
+        testId: studentData.permittedTest,
+        testName: studentData.permittedTest,
+        action: action
+      })
+    });
+    console.log('Practice attempt logged:', action);
+  } catch (error) {
+    console.error('Failed to log practice attempt:', error);
+  }
+}
+
 // Page navigation
 function showPage(pageId) {
   // Pause all audio and video elements before changing pages
@@ -303,6 +325,8 @@ async function proceedAfterTestSelection() {
     // Practice mode: Skip ALL proctoring (camera, screen share, proctor device)
     if (isPracticeMode) {
       console.log('PRACTICE MODE: Skipping all proctoring, going to test instructions');
+      // Log practice attempt for admin visibility
+      logPracticeAttempt('started');
       showPage('pageTestInstructions');
     } else {
       // Normal mode: Go to camera/mic setup
@@ -959,136 +983,6 @@ function checkIfReadyToContinue() {
   // Note: Don't clear the interval - keep monitoring continuously
 }
 
-// ============ SCREEN SHARE DIAGNOSTICS ============
-
-// Collect comprehensive system diagnostics before screen share
-async function collectScreenShareDiagnostics() {
-  const diag = {
-    timestamp: new Date().toISOString(),
-
-    // Browser info
-    browser: {
-      userAgent: navigator.userAgent,
-      platform: navigator.platform,
-      vendor: navigator.vendor,
-      chromeVersion: (() => {
-        const match = navigator.userAgent.match(/Chrome\/(\d+\.\d+\.\d+\.\d+)/);
-        return match ? match[1] : 'not-chrome';
-      })(),
-      macOSVersion: (() => {
-        const match = navigator.userAgent.match(/Mac OS X (\d+[._]\d+[._]?\d*)/);
-        return match ? match[1].replace(/_/g, '.') : 'unknown';
-      })()
-    },
-
-    // Screen info
-    screen: {
-      width: window.screen.width,
-      height: window.screen.height,
-      colorDepth: window.screen.colorDepth,
-      pixelRatio: window.devicePixelRatio
-    },
-
-    // Active streams
-    streams: {
-      mainStream: mainStream ? {
-        active: mainStream.active,
-        videoTracks: mainStream.getVideoTracks().map(t => ({
-          label: t.label,
-          readyState: t.readyState,
-          enabled: t.enabled,
-          muted: t.muted,
-          settings: t.getSettings()
-        })),
-        audioTracks: mainStream.getAudioTracks().map(t => ({
-          label: t.label,
-          readyState: t.readyState,
-          enabled: t.enabled
-        }))
-      } : null,
-      screenStream: screenStream ? { active: screenStream.active } : null
-    },
-
-    // App state
-    appState: {
-      faceDetectorExists: !!faceDetector,
-      qualityCheckIntervalActive: !!qualityCheckInterval,
-      isPracticeMode: isPracticeMode
-    },
-
-    // GPU/WebGL state
-    gpu: (() => {
-      try {
-        const canvas = document.createElement('canvas');
-        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-        if (!gl) return { available: false };
-        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-        return {
-          available: true,
-          vendor: debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : 'hidden',
-          renderer: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : 'hidden',
-          contextLost: gl.isContextLost()
-        };
-      } catch (e) {
-        return { error: e.message };
-      }
-    })(),
-
-    // TensorFlow state
-    tensorflow: (() => {
-      if (typeof tf === 'undefined') return { loaded: false };
-      try {
-        const mem = tf.memory();
-        return {
-          backend: tf.getBackend(),
-          numTensors: mem.numTensors,
-          numBytes: mem.numBytes,
-          numBytesInGPU: mem.numBytesInGPU || 0
-        };
-      } catch (e) {
-        return { error: e.message };
-      }
-    })(),
-
-    // Video elements
-    videoElements: Array.from(document.querySelectorAll('video')).map(v => ({
-      id: v.id || 'no-id',
-      hasSrcObject: !!v.srcObject,
-      readyState: v.readyState,
-      videoWidth: v.videoWidth,
-      videoHeight: v.videoHeight
-    })),
-
-    // Canvas elements
-    canvasCount: document.querySelectorAll('canvas').length
-  };
-
-  // Device enumeration
-  try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    diag.devices = {
-      videoInputs: devices.filter(d => d.kind === 'videoinput').length,
-      audioInputs: devices.filter(d => d.kind === 'audioinput').length,
-      audioOutputs: devices.filter(d => d.kind === 'audiooutput').length
-    };
-  } catch (e) {
-    diag.devices = { error: e.message };
-  }
-
-  // Permissions
-  if (navigator.permissions) {
-    try {
-      const cam = await navigator.permissions.query({ name: 'camera' });
-      const mic = await navigator.permissions.query({ name: 'microphone' });
-      diag.permissions = { camera: cam.state, microphone: mic.state };
-    } catch (e) {
-      diag.permissions = { error: e.message };
-    }
-  }
-
-  return diag;
-}
-
 // Request screen sharing before continuing to proctor setup
 async function requestScreenShareAndContinue() {
   // Practice mode: Skip screen sharing
@@ -1098,166 +992,65 @@ async function requestScreenShareAndContinue() {
     return;
   }
 
-  console.log('=== SCREEN SHARE ATTEMPT START ===');
-
-  // Collect pre-call diagnostics
-  const preDiag = await collectScreenShareDiagnostics();
-  console.log('[DIAG] Pre-call state:', JSON.stringify(preDiag, null, 2));
-
-  // Stop face detection to release WebGL/GPU resources before screen capture
+  // Stop face detection interval
   if (qualityCheckInterval) {
     clearInterval(qualityCheckInterval);
     qualityCheckInterval = null;
-    console.log('[CLEANUP] Cleared quality check interval');
   }
 
-  // Dispose TensorFlow face detector to free GPU memory
-  if (faceDetector) {
-    try {
-      const tfMemBefore = typeof tf !== 'undefined' ? tf.memory() : null;
-      console.log('[CLEANUP] TF memory before dispose:', tfMemBefore);
-
-      faceDetector.dispose();
-      faceDetector = null;
-
-      const tfMemAfter = typeof tf !== 'undefined' ? tf.memory() : null;
-      console.log('[CLEANUP] TF memory after dispose:', tfMemAfter);
-      console.log('[CLEANUP] Disposed face detector');
-    } catch (e) {
-      console.warn('[CLEANUP] Could not dispose face detector:', e);
-    }
-  }
-
-  // Stop camera stream to free hardware resources
-  // On macOS Chrome, active camera can block screen capture
+  // FULLY release camera - Chrome macOS requires this
   const previewVideo = document.getElementById('previewVideo');
-  let cameraWasActive = false;
-  if (mainStream && mainStream.active) {
-    cameraWasActive = true;
-    console.log('[CLEANUP] Stopping camera stream to free hardware');
-    mainStream.getTracks().forEach(track => {
-      console.log('[CLEANUP] Stopping track:', track.kind, track.label);
-      track.stop();
-    });
+  if (mainStream) {
+    mainStream.getTracks().forEach(track => track.stop());
     mainStream = null;
-    if (previewVideo) {
-      previewVideo.srcObject = null;
-    }
-    // Small delay to let hardware fully release
-    await new Promise(resolve => setTimeout(resolve, 200));
-    console.log('[CLEANUP] Camera stopped, waited 200ms for hardware release');
+  }
+  if (previewVideo && previewVideo.srcObject) {
+    previewVideo.srcObject = null;
   }
 
-  // Post-cleanup diagnostics
-  const postCleanupDiag = await collectScreenShareDiagnostics();
-  console.log('[DIAG] Post-cleanup state:', JSON.stringify({
-    tensorflow: postCleanupDiag.tensorflow,
-    appState: postCleanupDiag.appState,
-    streams: postCleanupDiag.streams
-  }, null, 2));
-
-  // Try the getDisplayMedia call
-  const constraints = {
-    video: {
-      cursor: 'always',
-      displaySurface: 'monitor',
-    },
-    audio: false,
-  };
-
-  console.log('[SCREEN_SHARE] Calling getDisplayMedia with:', JSON.stringify(constraints));
-  console.log('[SCREEN_SHARE] Call timestamp:', new Date().toISOString());
+  // Wait for Chrome to fully release resources
+  await new Promise(resolve => setTimeout(resolve, 500));
 
   try {
-    const startTime = performance.now();
-    screenStream = await navigator.mediaDevices.getDisplayMedia(constraints);
-    const endTime = performance.now();
+    // Use simplest possible call
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
 
-    // Success - log details
-    const successInfo = {
-      durationMs: endTime - startTime,
-      streamId: screenStream.id,
-      active: screenStream.active,
-      tracks: screenStream.getTracks().map(t => ({
-        kind: t.kind,
-        label: t.label,
-        readyState: t.readyState,
-        settings: t.getSettings()
-      }))
-    };
-    console.log('[SCREEN_SHARE] SUCCESS:', JSON.stringify(successInfo, null, 2));
-
-    // Re-acquire camera after successful screen share
-    if (cameraWasActive) {
-      try {
-        console.log('[CAMERA] Re-acquiring camera after screen share...');
-        mainStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-        });
-        if (previewVideo) {
-          previewVideo.srcObject = mainStream;
-        }
-        console.log('[CAMERA] Camera re-acquired successfully');
-      } catch (camError) {
-        console.error('[CAMERA] Failed to re-acquire camera:', camError);
-      }
-    }
+    console.log('Screen sharing granted');
 
     screenStream.getVideoTracks()[0].addEventListener('ended', () => {
       console.warn('Screen sharing stopped by user');
       alert('Screen sharing was stopped. This may affect your test submission.');
     });
 
-    // Restart face detection after successful screen share
-    checkVideoQuality();
+    // Re-acquire camera
+    try {
+      mainStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      if (previewVideo) {
+        previewVideo.srcObject = mainStream;
+      }
+    } catch (camErr) {
+      console.error('Failed to re-acquire camera:', camErr);
+    }
 
     showPage('page3');
   } catch (error) {
-    // Detailed error logging
-    const errorInfo = {
-      name: error.name,
-      message: error.message,
-      code: error.code,
-      constraint: error.constraint,
-      stack: error.stack,
-      timestamp: new Date().toISOString(),
-      preDiagnostics: preDiag,
-      postCleanupTensorflow: postCleanupDiag.tensorflow,
-      cameraWasStopped: cameraWasActive
-    };
-
-    console.error('[SCREEN_SHARE] FAILED:', JSON.stringify(errorInfo, null, 2));
-    console.error('=== SCREEN SHARE ATTEMPT END (FAILED) ===');
+    console.error('Screen sharing error:', error);
 
     // Re-acquire camera even on failure
-    if (cameraWasActive) {
-      try {
-        console.log('[CAMERA] Re-acquiring camera after screen share failure...');
-        mainStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-        });
-        if (previewVideo) {
-          previewVideo.srcObject = mainStream;
-        }
-        console.log('[CAMERA] Camera re-acquired successfully');
-      } catch (camError) {
-        console.error('[CAMERA] Failed to re-acquire camera:', camError);
+    try {
+      mainStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      if (previewVideo) {
+        previewVideo.srcObject = mainStream;
       }
+    } catch (camErr) {
+      console.error('Failed to re-acquire camera:', camErr);
     }
-
-    // Send to server for persistence
-    if (typeof errorLogger !== 'undefined') {
-      try {
-        await errorLogger.logError('SCREEN_SHARE_FAILED', error.message, JSON.stringify(errorInfo));
-      } catch (e) {
-        console.warn('Could not send error to server:', e);
-      }
-    }
-
-    // Restart face detection even on failure
-    checkVideoQuality();
 
     alert('Screen sharing is REQUIRED. Please try again and share your ENTIRE SCREEN.');
   }
