@@ -980,7 +980,6 @@ async function requestScreenShareAndContinue() {
           displaySurface: 'monitor',
         },
         audio: false,
-        preferCurrentTab: false,
       });
 
       // CRITICAL: Validate they actually shared entire screen, not just a window/tab
