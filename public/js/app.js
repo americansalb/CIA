@@ -978,7 +978,6 @@ async function requestScreenShareAndContinue() {
     });
 
     console.log('Screen sharing granted');
-    console.log('Screen share settings:', screenStream.getVideoTracks()[0].getSettings());
 
     // Handle user stopping screen share
     screenStream.getVideoTracks()[0].addEventListener('ended', () => {
@@ -990,7 +989,7 @@ async function requestScreenShareAndContinue() {
     showPage('page3');
   } catch (error) {
     console.error('Screen sharing error:', error);
-    alert('Screen sharing is required to take this test. Please click the button to try again.');
+    alert('Screen sharing failed. Please try again.\n\nError: ' + error.message);
   }
 }
 
