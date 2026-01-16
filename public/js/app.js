@@ -978,13 +978,26 @@ async function requestScreenShareAndContinue() {
   // Small delay to let resources free up
   await new Promise(resolve => setTimeout(resolve, 100));
 
+  // Temporarily pause camera stream - some systems have conflicts
+  const previewVideo = document.getElementById('previewVideo');
+  if (previewVideo && previewVideo.srcObject) {
+    previewVideo.srcObject.getVideoTracks().forEach(track => track.enabled = false);
+    console.log('Temporarily disabled camera track');
+  }
+
   try {
     console.log('Requesting screen share...');
     screenStream = await navigator.mediaDevices.getDisplayMedia({
       video: true
     });
 
-    console.log('Screen sharing granted');
+    console.log('Screen sharing granted, track:', screenStream.getVideoTracks()[0].label);
+
+    // Re-enable camera
+    if (previewVideo && previewVideo.srcObject) {
+      previewVideo.srcObject.getVideoTracks().forEach(track => track.enabled = true);
+      console.log('Re-enabled camera track');
+    }
 
     // Handle user stopping screen share
     screenStream.getVideoTracks()[0].addEventListener('ended', () => {
@@ -995,7 +1008,13 @@ async function requestScreenShareAndContinue() {
     // Continue to proctor page
     showPage('page3');
   } catch (error) {
-    console.error('Screen sharing error:', error);
+    console.error('Screen sharing error:', error.name, error.message);
+
+    // Re-enable camera on failure
+    if (previewVideo && previewVideo.srcObject) {
+      previewVideo.srcObject.getVideoTracks().forEach(track => track.enabled = true);
+    }
+
     alert('Screen sharing failed. Please try again.\n\nError: ' + error.message);
   }
 }
