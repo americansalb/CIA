@@ -968,49 +968,16 @@ async function requestScreenShareAndContinue() {
     return;
   }
 
-  // Stop face detection before screen share
-  if (qualityCheckInterval) {
-    clearInterval(qualityCheckInterval);
-    qualityCheckInterval = null;
-    console.log('Stopped quality check interval before screen share');
-  }
-
-  // COMPLETELY stop camera to free resources (required on macOS Chrome)
-  const previewVideo = document.getElementById('previewVideo');
-  if (mainStream) {
-    mainStream.getTracks().forEach(track => track.stop());
-    mainStream = null;
-    console.log('Stopped camera stream to free resources for screen share');
-  }
-
-  // Wait for resources to be fully released
-  await new Promise(resolve => setTimeout(resolve, 300));
-
   try {
-    console.log('Requesting screen share...');
     screenStream = await navigator.mediaDevices.getDisplayMedia({
       video: {
         cursor: 'always',
-        displaySurface: 'monitor'
+        displaySurface: 'monitor',
       },
-      audio: false
+      audio: false,
     });
 
-    console.log('Screen sharing granted, track:', screenStream.getVideoTracks()[0].label);
-
-    // Re-acquire camera after screen share succeeds
-    try {
-      mainStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-      });
-      if (previewVideo) {
-        previewVideo.srcObject = mainStream;
-      }
-      console.log('Camera re-acquired after screen share');
-    } catch (camError) {
-      console.error('Failed to re-acquire camera:', camError);
-    }
+    console.log('Screen sharing granted');
 
     // Handle user stopping screen share
     screenStream.getVideoTracks()[0].addEventListener('ended', () => {
@@ -1021,23 +988,8 @@ async function requestScreenShareAndContinue() {
     // Continue to proctor page
     showPage('page3');
   } catch (error) {
-    console.error('Screen sharing error:', error.name, error.message);
-
-    // Re-acquire camera on failure
-    try {
-      mainStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-      });
-      if (previewVideo) {
-        previewVideo.srcObject = mainStream;
-      }
-      console.log('Camera re-acquired after screen share failure');
-    } catch (camError) {
-      console.error('Failed to re-acquire camera:', camError);
-    }
-
-    alert('Screen sharing failed. Please try again.\n\nError: ' + error.message);
+    console.error('Screen sharing error:', error);
+    alert('Screen sharing is REQUIRED to take this test. Please try again.\n\nError: ' + error.message);
   }
 }
 
