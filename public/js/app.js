@@ -961,10 +961,10 @@ function checkIfReadyToContinue() {
 
 // Request screen sharing before continuing to proctor setup
 async function requestScreenShareAndContinue() {
-  // Practice mode: Skip screen sharing and proctor setup entirely
+  // Practice mode: Skip screen sharing
   if (isPracticeMode) {
-    console.log('PRACTICE MODE: Skipping screen sharing and proctor setup');
-    showPage('page5'); // Go directly to test instructions
+    console.log('PRACTICE MODE: Skipping screen sharing');
+    showPage('page5');
     return;
   }
 
@@ -979,17 +979,15 @@ async function requestScreenShareAndContinue() {
 
     console.log('Screen sharing granted');
 
-    // Handle user stopping screen share
     screenStream.getVideoTracks()[0].addEventListener('ended', () => {
       console.warn('Screen sharing stopped by user');
       alert('Screen sharing was stopped. This may affect your test submission.');
     });
 
-    // Continue to proctor page
     showPage('page3');
   } catch (error) {
     console.error('Screen sharing error:', error);
-    alert('Screen sharing is REQUIRED to take this test. Please try again.\n\nError: ' + error.message);
+    alert('Screen sharing is REQUIRED. Please try again and share your ENTIRE SCREEN.');
   }
 }
 
