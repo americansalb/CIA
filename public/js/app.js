@@ -975,17 +975,35 @@ async function requestScreenShareAndContinue() {
     console.log('Stopped quality check interval before screen share');
   }
 
+  // Dispose TensorFlow.js face detector to free GPU resources
+  if (faceDetector) {
+    try {
+      faceDetector.dispose();
+      faceDetector = null;
+      console.log('Disposed face detector');
+    } catch (e) {
+      console.warn('Failed to dispose face detector:', e);
+    }
+  }
+
   // COMPLETELY stop camera to free resources (required on macOS Chrome)
   const previewVideo = document.getElementById('previewVideo');
   if (mainStream) {
     mainStream.getTracks().forEach(track => track.stop());
+    mainStream = null;
     console.log('Stopped camera stream to free resources for screen share');
   }
+
+  // Wait for resources to be fully released
+  await new Promise(resolve => setTimeout(resolve, 300));
 
   try {
     console.log('Requesting screen share...');
     screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: true
+      video: {
+        displaySurface: 'monitor'
+      },
+      audio: false
     });
 
     console.log('Screen sharing granted, track:', screenStream.getVideoTracks()[0].label);
