@@ -968,6 +968,24 @@ async function requestScreenShareAndContinue() {
     return;
   }
 
+  // Stop face detection to release WebGL/GPU resources before screen capture
+  if (qualityCheckInterval) {
+    clearInterval(qualityCheckInterval);
+    qualityCheckInterval = null;
+    console.log('Paused face detection for screen share');
+  }
+
+  // Dispose TensorFlow face detector to free GPU memory
+  if (faceDetector) {
+    try {
+      faceDetector.dispose();
+      faceDetector = null;
+      console.log('Disposed face detector for screen share');
+    } catch (e) {
+      console.warn('Could not dispose face detector:', e);
+    }
+  }
+
   try {
     screenStream = await navigator.mediaDevices.getDisplayMedia({
       video: {
@@ -984,9 +1002,16 @@ async function requestScreenShareAndContinue() {
       alert('Screen sharing was stopped. This may affect your test submission.');
     });
 
+    // Restart face detection after successful screen share
+    checkVideoQuality();
+
     showPage('page3');
   } catch (error) {
     console.error('Screen sharing error:', error);
+
+    // Restart face detection even on failure
+    checkVideoQuality();
+
     alert('Screen sharing is REQUIRED. Please try again and share your ENTIRE SCREEN.');
   }
 }
