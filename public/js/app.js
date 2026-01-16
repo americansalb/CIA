@@ -968,35 +968,48 @@ async function requestScreenShareAndContinue() {
     return;
   }
 
-  // Stop face detection before screen share - TensorFlow.js may conflict
+  // Stop face detection before screen share
   if (qualityCheckInterval) {
     clearInterval(qualityCheckInterval);
     qualityCheckInterval = null;
     console.log('Stopped quality check interval before screen share');
   }
 
-  // Small delay to let resources free up
-  await new Promise(resolve => setTimeout(resolve, 100));
-
-  // Temporarily pause camera stream - some systems have conflicts
+  // COMPLETELY stop camera to free resources (required on macOS Chrome)
   const previewVideo = document.getElementById('previewVideo');
-  if (previewVideo && previewVideo.srcObject) {
-    previewVideo.srcObject.getVideoTracks().forEach(track => track.enabled = false);
-    console.log('Temporarily disabled camera track');
+  if (mainStream) {
+    mainStream.getTracks().forEach(track => track.stop());
+    mainStream = null;
+    console.log('Stopped camera stream to free resources for screen share');
   }
+
+  // Wait for resources to be fully released
+  await new Promise(resolve => setTimeout(resolve, 300));
 
   try {
     console.log('Requesting screen share...');
     screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: true
+      video: {
+        displaySurface: 'monitor'  // Pre-select "Entire Screen" tab in picker
+      },
+      audio: false,
+      selfBrowserSurface: 'exclude'  // Don't show current tab as option
     });
 
     console.log('Screen sharing granted, track:', screenStream.getVideoTracks()[0].label);
 
-    // Re-enable camera
-    if (previewVideo && previewVideo.srcObject) {
-      previewVideo.srcObject.getVideoTracks().forEach(track => track.enabled = true);
-      console.log('Re-enabled camera track');
+    // Re-acquire camera after screen share succeeds
+    try {
+      mainStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      });
+      if (previewVideo) {
+        previewVideo.srcObject = mainStream;
+      }
+      console.log('Camera re-acquired after screen share');
+    } catch (camError) {
+      console.error('Failed to re-acquire camera:', camError);
     }
 
     // Handle user stopping screen share
@@ -1010,9 +1023,18 @@ async function requestScreenShareAndContinue() {
   } catch (error) {
     console.error('Screen sharing error:', error.name, error.message);
 
-    // Re-enable camera on failure
-    if (previewVideo && previewVideo.srcObject) {
-      previewVideo.srcObject.getVideoTracks().forEach(track => track.enabled = true);
+    // Re-acquire camera on failure
+    try {
+      mainStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      });
+      if (previewVideo) {
+        previewVideo.srcObject = mainStream;
+      }
+      console.log('Camera re-acquired after screen share failure');
+    } catch (camError) {
+      console.error('Failed to re-acquire camera:', camError);
     }
 
     alert('Screen sharing failed. Please try again.\n\nError: ' + error.message);
