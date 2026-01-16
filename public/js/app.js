@@ -969,13 +969,15 @@ async function requestScreenShareAndContinue() {
   }
 
   try {
-    // Simplest possible call - no constraints
     screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: true
+      video: {
+        cursor: 'always',
+        displaySurface: 'monitor',
+      },
+      audio: false,
     });
 
     console.log('Screen sharing granted');
-    console.log('Screen share settings:', screenStream.getVideoTracks()[0].getSettings());
 
     // Handle user stopping screen share
     screenStream.getVideoTracks()[0].addEventListener('ended', () => {
@@ -987,7 +989,11 @@ async function requestScreenShareAndContinue() {
     showPage('page3');
   } catch (error) {
     console.error('Screen sharing error:', error);
-    alert('Screen sharing is required to take this test. Please click the button to try again.');
+    // Screen sharing is optional - allow user to continue
+    const continueAnyway = confirm('Screen sharing is recommended. Continue without it?');
+    if (continueAnyway) {
+      showPage('page3');
+    }
   }
 }
 
