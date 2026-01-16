@@ -968,8 +968,18 @@ async function requestScreenShareAndContinue() {
     return;
   }
 
+  // Stop face detection before screen share - TensorFlow.js may conflict
+  if (qualityCheckInterval) {
+    clearInterval(qualityCheckInterval);
+    qualityCheckInterval = null;
+    console.log('Stopped quality check interval before screen share');
+  }
+
+  // Small delay to let resources free up
+  await new Promise(resolve => setTimeout(resolve, 100));
+
   try {
-    // Simplest possible call - Chrome on macOS can fail with constraints
+    console.log('Requesting screen share...');
     screenStream = await navigator.mediaDevices.getDisplayMedia({
       video: true
     });
