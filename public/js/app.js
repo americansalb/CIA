@@ -1001,9 +1001,10 @@ async function requestScreenShareAndContinue() {
     console.log('Requesting screen share...');
     screenStream = await navigator.mediaDevices.getDisplayMedia({
       video: {
-        displaySurface: 'monitor'
+        displaySurface: 'monitor'  // Pre-select "Entire Screen" tab in picker
       },
-      audio: false
+      audio: false,
+      selfBrowserSurface: 'exclude'  // Don't show current tab as option
     });
 
     console.log('Screen sharing granted, track:', screenStream.getVideoTracks()[0].label);
