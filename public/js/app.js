@@ -989,11 +989,7 @@ async function requestScreenShareAndContinue() {
     showPage('page3');
   } catch (error) {
     console.error('Screen sharing error:', error);
-    // Screen sharing is optional - allow user to continue
-    const continueAnyway = confirm('Screen sharing is recommended. Continue without it?');
-    if (continueAnyway) {
-      showPage('page3');
-    }
+    alert('Screen sharing failed. Please try again.\n\nError: ' + error.message);
   }
 }
 
