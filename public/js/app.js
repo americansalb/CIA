@@ -959,7 +959,7 @@ function checkIfReadyToContinue() {
   // Note: Don't clear the interval - keep monitoring continuously
 }
 
-// Request screen sharing before continuing to proctor setup - MUST share entire screen
+// Request screen sharing before continuing to proctor setup
 async function requestScreenShareAndContinue() {
   // Practice mode: Skip screen sharing and proctor setup entirely
   if (isPracticeMode) {
@@ -968,96 +968,30 @@ async function requestScreenShareAndContinue() {
     return;
   }
 
-  let attempts = 0;
-  const maxAttempts = 5;
+  try {
+    screenStream = await navigator.mediaDevices.getDisplayMedia({
+      video: {
+        cursor: 'always',
+        displaySurface: 'monitor',
+      },
+      audio: false,
+    });
 
-  while (attempts < maxAttempts) {
-    try {
-      // Request screen share - prefer entire monitor
-      screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          cursor: 'always',
-          displaySurface: 'monitor',
-        },
-        audio: false,
-      });
+    console.log('Screen sharing granted');
+    console.log('Screen share settings:', screenStream.getVideoTracks()[0].getSettings());
 
-      // CRITICAL: Validate they actually shared entire screen, not just a window/tab
-      const videoTrack = screenStream.getVideoTracks()[0];
-      const settings = videoTrack.getSettings();
+    // Handle user stopping screen share
+    screenStream.getVideoTracks()[0].addEventListener('ended', () => {
+      console.warn('Screen sharing stopped by user');
+      alert('Screen sharing was stopped. This may affect your test submission.');
+    });
 
-      console.log('Screen share settings:', settings);
-      console.log('Display surface:', settings.displaySurface);
-
-      // Check if they shared entire screen
-      if (settings.displaySurface === 'monitor') {
-        console.log('✓ Entire screen shared - approved');
-
-        // Handle user stopping screen share
-        videoTrack.addEventListener('ended', () => {
-          console.warn('Screen sharing stopped by user');
-          alert('Screen sharing was stopped. This may affect your test submission.');
-        });
-
-        // Continue to proctor page
-        showPage('page3');
-        return; // Success!
-      } else {
-        // They shared a window or tab instead of entire screen - REJECT
-        console.warn('✗ User shared', settings.displaySurface, 'instead of entire screen');
-
-        // Stop the stream they just shared
-        screenStream.getTracks().forEach(track => track.stop());
-        screenStream = null;
-
-        // Force them to try again
-        const retry = confirm(
-          '⚠️ You must share your ENTIRE SCREEN, not just a window or tab.\n\n' +
-          'This is required to prevent cheating.\n\n' +
-          'Click OK to try again and select "Entire Screen" from the options.'
-        );
-
-        if (!retry) {
-          alert('Screen sharing of your entire screen is REQUIRED to take this test. You cannot proceed without it.');
-          attempts++;
-          continue;
-        }
-
-        attempts++;
-        continue; // Loop and try again
-      }
-    } catch (error) {
-      console.error('Screen sharing error:', error.name, error.message);
-
-      // User cancelled
-      if (error.name === 'NotAllowedError' || error.name === 'AbortError') {
-        alert('Screen sharing is REQUIRED. You cannot take the test without sharing your entire screen.');
-        attempts++;
-
-        if (attempts >= maxAttempts) {
-          alert('You have declined screen sharing too many times. Please refresh the page and try again.');
-          return;
-        }
-        continue;
-      }
-
-      // Any other error - retry automatically
-      console.log('Screen share attempt failed, retrying...', attempts + 1);
-      attempts++;
-
-      if (attempts >= maxAttempts) {
-        alert('Screen sharing failed after multiple attempts. Please refresh the page and try again.\n\nError: ' + error.message);
-        return;
-      }
-
-      // Wait a moment before retrying
-      await new Promise(resolve => setTimeout(resolve, 500));
-      continue;
-    }
+    // Continue to proctor page
+    showPage('page3');
+  } catch (error) {
+    console.error('Screen sharing error:', error);
+    alert('Screen sharing is required to take this test. Please click the button to try again.');
   }
-
-  // If we get here, they failed too many times
-  alert('Screen sharing is required to take this test. Please refresh the page and try again.');
 }
 
 // Start test - triggered when clicking Continue from proctor page (page3 -> page5)
