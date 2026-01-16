@@ -973,10 +973,14 @@ async function requestScreenShareAndContinue() {
 
   while (attempts < maxAttempts) {
     try {
-      // Simple getDisplayMedia - no fancy options that break on macOS
+      // Request screen share - prefer entire monitor
       screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
+        video: {
+          cursor: 'always',
+          displaySurface: 'monitor',
+        },
         audio: false,
+        preferCurrentTab: false,
       });
 
       // CRITICAL: Validate they actually shared entire screen, not just a window/tab
