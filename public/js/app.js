@@ -969,12 +969,9 @@ async function requestScreenShareAndContinue() {
   }
 
   try {
+    // Simplest possible call - no constraints
     screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        cursor: 'always',
-        displaySurface: 'monitor',
-      },
-      audio: false,
+      video: true
     });
 
     console.log('Screen sharing granted');
