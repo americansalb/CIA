@@ -35,6 +35,8 @@ app.post('/api/combine-chunks', require('./api/combine-chunks'));
 app.post('/api/split-and-upload', require('./api/split-and-upload'));
 app.post('/api/save-emergency-state', require('./api/save-emergency-state'));
 app.post('/api/log-client-error', require('./api/log-client-error'));
+app.post('/api/log-practice-attempt', require('./api/log-practice-attempt'));
+app.get('/api/practice-attempts', require('./api/get-practice-attempts'));
 
 // Serve main app
 app.get('/', (req, res) => {

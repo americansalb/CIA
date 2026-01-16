@@ -36,6 +36,28 @@ const TEST_CONFIGS = {
   // Add more test variants...
 };
 
+// Log practice mode attempts for admin visibility
+async function logPracticeAttempt(action) {
+  if (!studentData) return;
+
+  try {
+    await fetch('/api/log-practice-attempt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: studentData.email,
+        studentId: studentData.studentId,
+        testId: studentData.permittedTest,
+        testName: studentData.permittedTest,
+        action: action
+      })
+    });
+    console.log('Practice attempt logged:', action);
+  } catch (error) {
+    console.error('Failed to log practice attempt:', error);
+  }
+}
+
 // Page navigation
 function showPage(pageId) {
   // Pause all audio and video elements before changing pages
@@ -303,6 +325,8 @@ async function proceedAfterTestSelection() {
     // Practice mode: Skip ALL proctoring (camera, screen share, proctor device)
     if (isPracticeMode) {
       console.log('PRACTICE MODE: Skipping all proctoring, going to test instructions');
+      // Log practice attempt for admin visibility
+      logPracticeAttempt('started');
       showPage('pageTestInstructions');
     } else {
       // Normal mode: Go to camera/mic setup

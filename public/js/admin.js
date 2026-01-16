@@ -2,6 +2,7 @@
 console.log('[Admin] admin.js script loaded at', new Date().toISOString());
 let adminEmail = null;
 let allRecordings = [];
+let practiceAttempts = [];
 let filteredRecordings = [];
 let currentStatusFilter = 'all';
 let expandedRecordings = new Set();
@@ -64,16 +65,25 @@ async function loadRecordings() {
   container.innerHTML = '<div class="loading-spinner"></div>';
 
   try {
-    const response = await fetch('/api/recordings');
-    const result = await response.json();
+    // Load both recordings and practice attempts in parallel
+    const [recordingsResponse, practiceResponse] = await Promise.all([
+      fetch('/api/recordings'),
+      fetch('/api/practice-attempts')
+    ]);
 
-    if (result.success) {
-      allRecordings = result.recordings;
-      updateFilterCounts();
-      filterRecordings();
-    } else {
-      container.innerHTML = '<p style="text-align: center; color: #666;">Failed to load recordings</p>';
+    const recordingsResult = await recordingsResponse.json();
+    const practiceResult = await practiceResponse.json();
+
+    if (recordingsResult.success) {
+      allRecordings = recordingsResult.recordings;
     }
+
+    if (practiceResult.success) {
+      practiceAttempts = practiceResult.attempts;
+    }
+
+    updateFilterCounts();
+    filterRecordings();
   } catch (error) {
     console.error('Error loading recordings:', error);
     container.innerHTML = '<p style="text-align: center; color: #c33;">Error loading recordings</p>';
@@ -85,13 +95,15 @@ function updateFilterCounts() {
     all: allRecordings.length,
     pending_review: allRecordings.filter(r => r.status === 'pending_review').length,
     incomplete: allRecordings.filter(r => r.status === 'incomplete').length,
-    graded: allRecordings.filter(r => r.status === 'graded' || r.status === 'passed' || r.status === 'failed').length
+    graded: allRecordings.filter(r => r.status === 'graded' || r.status === 'passed' || r.status === 'failed').length,
+    practice: practiceAttempts.length
   };
 
   document.getElementById('countAll').textContent = counts.all;
   document.getElementById('countPending').textContent = counts.pending_review;
   document.getElementById('countIncomplete').textContent = counts.incomplete;
   document.getElementById('countGraded').textContent = counts.graded;
+  document.getElementById('countPractice').textContent = counts.practice;
 }
 
 function setFilter(filter) {
@@ -109,6 +121,12 @@ function filterRecordings() {
   const searchInput = document.getElementById('searchInput');
   const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
   const sortFilter = document.getElementById('sortFilter').value;
+
+  // Handle practice attempts separately
+  if (currentStatusFilter === 'practice') {
+    renderPracticeAttempts(searchQuery, sortFilter);
+    return;
+  }
 
   // Start with all recordings
   filteredRecordings = [...allRecordings];
@@ -174,6 +192,77 @@ function renderRecordings() {
   `;
 
   container.innerHTML = header + filteredRecordings.map(recording => createRecordingRow(recording)).join('');
+}
+
+function renderPracticeAttempts(searchQuery, sortFilter) {
+  const container = document.getElementById('recordingsContainer');
+
+  let filtered = [...practiceAttempts];
+
+  // Filter by search
+  if (searchQuery) {
+    filtered = filtered.filter(a =>
+      a.email.toLowerCase().includes(searchQuery) ||
+      a.studentId.toLowerCase().includes(searchQuery) ||
+      (a.testName && a.testName.toLowerCase().includes(searchQuery))
+    );
+  }
+
+  // Sort
+  filtered.sort((a, b) => {
+    const dateA = new Date(a.timestamp);
+    const dateB = new Date(b.timestamp);
+    return sortFilter === 'newest' ? dateB - dateA : dateA - dateB;
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 60px; color: #666;">
+        <div style="font-size: 48px; margin-bottom: 15px;">🎯</div>
+        <p style="font-size: 16px; margin: 0;">No practice attempts found</p>
+        <p style="font-size: 13px; margin-top: 8px; color: #999;">Practice mode attempts are logged for 7 days</p>
+      </div>
+    `;
+    return;
+  }
+
+  const header = `
+    <div class="recording-row" style="background: #fff3e0; font-weight: 600; font-size: 12px; color: #666; text-transform: uppercase;">
+      <div>Student</div>
+      <div>Test</div>
+      <div>Date/Time</div>
+      <div>Action</div>
+      <div>Info</div>
+    </div>
+  `;
+
+  container.innerHTML = header + filtered.map(attempt => {
+    const date = new Date(attempt.timestamp);
+    const dateStr = date.toLocaleDateString();
+    const timeStr = date.toLocaleTimeString();
+
+    return `
+      <div class="recording-row" style="border-left: 3px solid #ff9800;">
+        <div class="recording-student">
+          <span class="recording-email">${attempt.email}</span>
+          <span class="recording-id">ID: ${attempt.studentId}</span>
+        </div>
+        <div class="recording-test">${attempt.testName || 'N/A'}</div>
+        <div class="recording-date">
+          ${dateStr}<br>
+          <span style="font-size: 11px; color: #888;">${timeStr}</span>
+        </div>
+        <div class="recording-status">
+          <span style="background: #ff9800; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">
+            Practice ${attempt.action || 'started'}
+          </span>
+        </div>
+        <div class="recording-actions" style="font-size: 11px; color: #666;">
+          No recording<br>(Practice mode)
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 function createRecordingRow(recording) {
