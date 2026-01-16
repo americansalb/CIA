@@ -975,17 +975,6 @@ async function requestScreenShareAndContinue() {
     console.log('Stopped quality check interval before screen share');
   }
 
-  // Dispose TensorFlow.js face detector to free GPU resources
-  if (faceDetector) {
-    try {
-      faceDetector.dispose();
-      faceDetector = null;
-      console.log('Disposed face detector');
-    } catch (e) {
-      console.warn('Failed to dispose face detector:', e);
-    }
-  }
-
   // COMPLETELY stop camera to free resources (required on macOS Chrome)
   const previewVideo = document.getElementById('previewVideo');
   if (mainStream) {
