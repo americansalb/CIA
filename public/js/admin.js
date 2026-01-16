@@ -90,311 +90,106 @@ async function loadRecordings() {
   }
 }
 
-function updateFilterCounts() {
-  const counts = {
-    all: allRecordings.length,
-    pending_review: allRecordings.filter(r => r.status === 'pending_review').length,
-    incomplete: allRecordings.filter(r => r.status === 'incomplete').length,
-    graded: allRecordings.filter(r => r.status === 'graded' || r.status === 'passed' || r.status === 'failed').length,
-    practice: practiceAttempts.length
-  };
-
-  document.getElementById('countAll').textContent = counts.all;
-  document.getElementById('countPending').textContent = counts.pending_review;
-  document.getElementById('countIncomplete').textContent = counts.incomplete;
-  document.getElementById('countGraded').textContent = counts.graded;
-  document.getElementById('countPractice').textContent = counts.practice;
-}
-
-function setFilter(filter) {
-  currentStatusFilter = filter;
-
-  // Update active button
-  document.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.filter === filter);
-  });
-
-  filterRecordings();
-}
-
+// Combine all attempts into unified list and filter
 function filterRecordings() {
   const searchInput = document.getElementById('searchInput');
   const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
   const sortFilter = document.getElementById('sortFilter').value;
 
-  // Handle practice attempts separately
-  if (currentStatusFilter === 'practice') {
-    renderPracticeAttempts(searchQuery, sortFilter);
-    return;
-  }
-
-  // Start with all recordings
-  filteredRecordings = [...allRecordings];
-
-  // Filter by status
-  if (currentStatusFilter !== 'all') {
-    if (currentStatusFilter === 'graded') {
-      filteredRecordings = filteredRecordings.filter(r =>
-        r.status === 'graded' || r.status === 'passed' || r.status === 'failed'
-      );
-    } else {
-      filteredRecordings = filteredRecordings.filter(r => r.status === currentStatusFilter);
-    }
-  }
-
-  // Filter by search query
-  if (searchQuery) {
-    filteredRecordings = filteredRecordings.filter(r =>
-      r.email.toLowerCase().includes(searchQuery) ||
-      r.studentId.toLowerCase().includes(searchQuery) ||
-      (r.permittedTest && r.permittedTest.toLowerCase().includes(searchQuery))
-    );
-  }
-
-  // Sort
-  filteredRecordings.sort((a, b) => {
-    const dateA = new Date(a.uploadedAt);
-    const dateB = new Date(b.uploadedAt);
-
-    if (sortFilter === 'newest') {
-      return dateB - dateA;
-    } else {
-      return dateA - dateB;
-    }
-  });
-
-  renderRecordings();
-}
-
-function renderRecordings() {
-  const container = document.getElementById('recordingsContainer');
-
-  if (filteredRecordings.length === 0) {
-    container.innerHTML = `
-      <div style="text-align: center; padding: 60px; color: #666;">
-        <div style="font-size: 48px; margin-bottom: 15px;">📹</div>
-        <p style="font-size: 16px; margin: 0;">No recordings found</p>
-        <p style="font-size: 13px; margin-top: 8px; color: #999;">Try adjusting your search or filter</p>
-      </div>
-    `;
-    return;
-  }
-
-  // Table header
-  const header = `
-    <div class="recording-row" style="background: #f8f9fa; font-weight: 600; font-size: 12px; color: #666; text-transform: uppercase;">
-      <div>Student</div>
-      <div>Test</div>
-      <div>Date</div>
-      <div>Status</div>
-      <div>Actions</div>
-    </div>
-  `;
-
-  container.innerHTML = header + filteredRecordings.map(recording => createRecordingRow(recording)).join('');
-}
-
-function renderPracticeAttempts(searchQuery, sortFilter) {
-  const container = document.getElementById('recordingsContainer');
-
-  let filtered = [...practiceAttempts];
+  // Combine recordings and practice attempts into one list
+  let allAttempts = [
+    ...allRecordings.map(r => ({
+      ...r,
+      type: 'recording',
+      date: new Date(r.uploadedAt),
+      dateStr: r.uploadedAt
+    })),
+    ...practiceAttempts.map(p => ({
+      ...p,
+      type: 'practice',
+      date: new Date(p.timestamp),
+      dateStr: p.timestamp,
+      permittedTest: p.testName
+    }))
+  ];
 
   // Filter by search
   if (searchQuery) {
-    filtered = filtered.filter(a =>
-      a.email.toLowerCase().includes(searchQuery) ||
-      a.studentId.toLowerCase().includes(searchQuery) ||
-      (a.testName && a.testName.toLowerCase().includes(searchQuery))
+    allAttempts = allAttempts.filter(a =>
+      (a.email && a.email.toLowerCase().includes(searchQuery)) ||
+      (a.studentId && a.studentId.toLowerCase().includes(searchQuery)) ||
+      (a.permittedTest && a.permittedTest.toLowerCase().includes(searchQuery))
     );
   }
 
-  // Sort
-  filtered.sort((a, b) => {
-    const dateA = new Date(a.timestamp);
-    const dateB = new Date(b.timestamp);
-    return sortFilter === 'newest' ? dateB - dateA : dateA - dateB;
-  });
+  // Sort by date
+  allAttempts.sort((a, b) => sortFilter === 'newest' ? b.date - a.date : a.date - b.date);
 
-  if (filtered.length === 0) {
-    container.innerHTML = `
-      <div style="text-align: center; padding: 60px; color: #666;">
-        <div style="font-size: 48px; margin-bottom: 15px;">🎯</div>
-        <p style="font-size: 16px; margin: 0;">No practice attempts found</p>
-        <p style="font-size: 13px; margin-top: 8px; color: #999;">Practice mode attempts are logged for 7 days</p>
-      </div>
-    `;
+  // Update count
+  const countEl = document.getElementById('totalCount');
+  if (countEl) countEl.textContent = `${allAttempts.length} attempts`;
+
+  renderCompactTable(allAttempts);
+}
+
+function renderCompactTable(attempts) {
+  const container = document.getElementById('recordingsContainer');
+
+  if (attempts.length === 0) {
+    container.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">No attempts found</div>';
     return;
   }
 
-  const header = `
-    <div class="recording-row" style="background: #fff3e0; font-weight: 600; font-size: 12px; color: #666; text-transform: uppercase;">
-      <div>Student</div>
-      <div>Test</div>
-      <div>Date/Time</div>
-      <div>Action</div>
-      <div>Info</div>
-    </div>
-  `;
-
-  container.innerHTML = header + filtered.map(attempt => {
-    const date = new Date(attempt.timestamp);
-    const dateStr = date.toLocaleDateString();
-    const timeStr = date.toLocaleTimeString();
+  const rows = attempts.map(a => {
+    const date = a.date;
+    const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    const isPractice = a.type === 'practice';
+    const hasVideo = !isPractice && a.videos && a.videos.length > 0;
 
     return `
-      <div class="recording-row" style="border-left: 3px solid #ff9800;">
-        <div class="recording-student">
-          <span class="recording-email">${attempt.email}</span>
-          <span class="recording-id">ID: ${attempt.studentId}</span>
-        </div>
-        <div class="recording-test">${attempt.testName || 'N/A'}</div>
-        <div class="recording-date">
-          ${dateStr}<br>
-          <span style="font-size: 11px; color: #888;">${timeStr}</span>
-        </div>
-        <div class="recording-status">
-          <span style="background: #ff9800; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">
-            Practice ${attempt.action || 'started'}
-          </span>
-        </div>
-        <div class="recording-actions" style="font-size: 11px; color: #666;">
-          No recording<br>(Practice mode)
-        </div>
-      </div>
+      <tr style="border-bottom: 1px solid #eee;">
+        <td style="padding: 8px 12px; font-size: 13px;">
+          <strong>${a.email || 'N/A'}</strong>
+          <span style="color: #888; margin-left: 8px;">${a.studentId || ''}</span>
+        </td>
+        <td style="padding: 8px 12px; font-size: 13px; color: #555;">${a.permittedTest || 'N/A'}</td>
+        <td style="padding: 8px 12px; font-size: 12px; color: #666;">${dateStr}</td>
+        <td style="padding: 8px 12px;">
+          ${isPractice
+            ? '<span style="background: #ff9800; color: white; padding: 2px 8px; border-radius: 10px; font-size: 11px;">Practice</span>'
+            : `<span style="background: ${a.status === 'incomplete' ? '#f44336' : '#4caf50'}; color: white; padding: 2px 8px; border-radius: 10px; font-size: 11px;">${a.status === 'incomplete' ? 'Incomplete' : 'Complete'}</span>`
+          }
+        </td>
+        <td style="padding: 8px 12px;">
+          ${hasVideo
+            ? `<button onclick="openMultiView('${a.sessionId}', '${a.email}')" style="background: #667eea; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Watch</button>`
+            : '<span style="color: #999; font-size: 11px;">No video</span>'
+          }
+        </td>
+      </tr>
     `;
   }).join('');
-}
 
-function createRecordingRow(recording) {
-  const date = new Date(recording.uploadedAt);
-  const dateStr = date.toLocaleDateString();
-  const isExpanded = expandedRecordings.has(recording.sessionId);
-
-  let statusDot, statusText;
-  if (recording.status === 'incomplete') {
-    statusDot = 'status-dot-incomplete';
-    statusText = 'Incomplete';
-  } else if (recording.status === 'pending_review') {
-    statusDot = 'status-dot-pending';
-    statusText = 'Pending';
-  } else {
-    statusDot = 'status-dot-graded';
-    statusText = 'Graded';
-  }
-
-  const mainVideo = recording.videos.find(v => v.deviceType === 'main');
-  const proctorVideo = recording.videos.find(v => v.deviceType === 'proctor');
-  const duration = recording.duration ? (recording.duration === 'incomplete' ? 'Incomplete' : formatDuration(recording.duration)) : '--';
-
-  return `
-    <div class="recording-row ${isExpanded ? 'expanded' : ''}" id="row-${recording.sessionId}">
-      <div class="recording-student">
-        <span class="recording-email">${recording.email}</span>
-        <span class="recording-id">ID: ${recording.studentId}</span>
-      </div>
-      <div class="recording-test">${recording.permittedTest || 'N/A'}</div>
-      <div class="recording-date">${dateStr}</div>
-      <div class="recording-status">
-        <span class="status-dot ${statusDot}"></span>${statusText}
-      </div>
-      <div class="recording-actions">
-        <button class="action-btn action-btn-watch" onclick="openMultiView('${recording.sessionId}', '${recording.email}')">
-          Watch
-        </button>
-        <button class="action-btn action-btn-expand" onclick="toggleRecordingDetails('${recording.sessionId}')">
-          ${isExpanded ? 'Less' : 'More'}
-        </button>
-      </div>
-
-      <!-- Expandable Details -->
-      <div class="recording-details">
-        <div class="details-grid">
-          <!-- Video Options -->
-          <div class="details-section">
-            <h4>Video Options</h4>
-            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-              <button class="action-btn action-btn-watch" onclick="openMultiView('${recording.sessionId}', '${recording.email}')">
-                All Cameras
-              </button>
-              ${mainVideo ? `<button class="action-btn" style="background: #5c6bc0; color: white;" onclick="openVideoPlayer('${recording.sessionId}', 'main', '${recording.email}')">Main Only</button>` : ''}
-              ${proctorVideo ? `<button class="action-btn" style="background: #26a69a; color: white;" onclick="openVideoPlayer('${recording.sessionId}', 'proctor', '${recording.email}')">Proctor Only</button>` : ''}
-            </div>
-            ${mainVideo ? `<a href="${mainVideo.webViewLink}" target="_blank" style="display: inline-block; margin-top: 10px; font-size: 12px; color: #667eea;">Open in Google Drive</a>` : ''}
-          </div>
-
-          <!-- Session Info -->
-          <div class="details-section">
-            <h4>Session Info</h4>
-            <div style="font-size: 13px; color: #555;">
-              <div style="margin-bottom: 6px;"><strong>Duration:</strong> ${duration}</div>
-              <div style="margin-bottom: 6px;"><strong>Interventions:</strong> ${recording.interventionCount || 0}</div>
-              <div style="margin-bottom: 6px;"><strong>Uploaded:</strong> ${date.toLocaleString()}</div>
-            </div>
-          </div>
-
-          <!-- Grading -->
-          <div class="details-section">
-            <h4>Grading</h4>
-            <form class="grade-form" onsubmit="submitGrade(event, '${recording.sessionId}')" style="gap: 10px;">
-              <select name="status" required style="padding: 8px; font-size: 13px;">
-                <option value="">Select Status</option>
-                <option value="passed" ${recording.status === 'passed' ? 'selected' : ''}>Passed</option>
-                <option value="failed" ${recording.status === 'failed' ? 'selected' : ''}>Failed</option>
-                <option value="needs_review" ${recording.status === 'needs_review' ? 'selected' : ''}>Needs Review</option>
-              </select>
-              <textarea name="notes" placeholder="Notes..." rows="2" style="font-size: 13px;">${recording.notes || ''}</textarea>
-              <button type="submit" style="padding: 8px 16px; font-size: 13px;">Save</button>
-            </form>
-          </div>
-
-          ${recording.chunkCount ? `
-          <!-- Combine Chunks -->
-          <div class="details-section">
-            <h4>Combine Chunks</h4>
-            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-              ${recording.chunkCount.main > 0 ? `
-                <button class="action-btn" style="background: #2196f3; color: white;"
-                  onclick="combineChunks('${recording.sessionFolderId}', 'main', '${recording.email}', '${recording.studentId}', this)">
-                  Main (${recording.chunkCount.main} chunks)
-                </button>
-              ` : ''}
-              ${recording.chunkCount.proctor > 0 ? `
-                <button class="action-btn" style="background: #2196f3; color: white;"
-                  onclick="combineChunks('${recording.sessionFolderId}', 'proctor', '${recording.email}', '${recording.studentId}', this)">
-                  Proctor (${recording.chunkCount.proctor} chunks)
-                </button>
-              ` : ''}
-            </div>
-          </div>
-          ` : ''}
-
-          ${recording.videos.some(v => v.needsConversion) ? `
-          <!-- Convert Videos -->
-          <div class="details-section">
-            <h4>Convert to MP4</h4>
-            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-              ${recording.videos.filter(v => v.needsConversion).map(v => `
-                <button class="action-btn" style="background: #ff9800; color: white;"
-                  onclick="convertVideo('${v.fileId}', '${recording.sessionFolderId}', '${v.fileName}', this)">
-                  ${v.deviceType}
-                </button>
-              `).join('')}
-            </div>
-          </div>
-          ` : ''}
-        </div>
-      </div>
-    </div>
+  container.innerHTML = `
+    <table style="width: 100%; border-collapse: collapse;">
+      <thead>
+        <tr style="background: #f5f5f5; border-bottom: 2px solid #ddd;">
+          <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #666; text-transform: uppercase;">Student</th>
+          <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #666; text-transform: uppercase;">Test</th>
+          <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #666; text-transform: uppercase;">Date</th>
+          <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #666; text-transform: uppercase;">Type</th>
+          <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #666; text-transform: uppercase;">Action</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
   `;
 }
 
-function toggleRecordingDetails(sessionId) {
-  if (expandedRecordings.has(sessionId)) {
-    expandedRecordings.delete(sessionId);
-  } else {
-    expandedRecordings.add(sessionId);
-  }
-  renderRecordings();
+function formatDuration(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}m ${secs}s`;
 }
 
 function createRecordingCard(recording) {
@@ -666,12 +461,6 @@ async function submitGrade(event, sessionId) {
     button.disabled = false;
     button.textContent = 'Save';
   }
-}
-
-function formatDuration(seconds) {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}m ${secs}s`;
 }
 
 // ====================
