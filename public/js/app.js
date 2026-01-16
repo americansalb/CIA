@@ -968,14 +968,28 @@ async function requestScreenShareAndContinue() {
     return;
   }
 
+  // Stop face detection interval
+  if (qualityCheckInterval) {
+    clearInterval(qualityCheckInterval);
+    qualityCheckInterval = null;
+  }
+
+  // FULLY release camera - Chrome macOS requires this
+  const previewVideo = document.getElementById('previewVideo');
+  if (mainStream) {
+    mainStream.getTracks().forEach(track => track.stop());
+    mainStream = null;
+  }
+  if (previewVideo && previewVideo.srcObject) {
+    previewVideo.srcObject = null;
+  }
+
+  // Wait for Chrome to fully release resources
+  await new Promise(resolve => setTimeout(resolve, 500));
+
   try {
-    screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        cursor: 'always',
-        displaySurface: 'monitor',
-      },
-      audio: false,
-    });
+    // Use simplest possible call
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
 
     console.log('Screen sharing granted');
 
@@ -984,9 +998,36 @@ async function requestScreenShareAndContinue() {
       alert('Screen sharing was stopped. This may affect your test submission.');
     });
 
+    // Re-acquire camera
+    try {
+      mainStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      if (previewVideo) {
+        previewVideo.srcObject = mainStream;
+      }
+    } catch (camErr) {
+      console.error('Failed to re-acquire camera:', camErr);
+    }
+
     showPage('page3');
   } catch (error) {
     console.error('Screen sharing error:', error);
+
+    // Re-acquire camera even on failure
+    try {
+      mainStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      if (previewVideo) {
+        previewVideo.srcObject = mainStream;
+      }
+    } catch (camErr) {
+      console.error('Failed to re-acquire camera:', camErr);
+    }
+
     alert('Screen sharing is REQUIRED. Please try again and share your ENTIRE SCREEN.');
   }
 }
