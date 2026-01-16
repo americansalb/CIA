@@ -176,6 +176,201 @@
       padding: 8px 12px;
     }
 
+    .filter-btn {
+      padding: 8px 16px;
+      border: 2px solid #e0e0e0;
+      background: white;
+      border-radius: 20px;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 13px;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .filter-btn:hover {
+      border-color: #667eea;
+      background: #f8f9ff;
+    }
+
+    .filter-btn.active {
+      background: #667eea;
+      color: white;
+      border-color: #667eea;
+    }
+
+    .filter-count {
+      background: rgba(0,0,0,0.1);
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 12px;
+    }
+
+    .filter-btn.active .filter-count {
+      background: rgba(255,255,255,0.2);
+    }
+
+    /* Recordings Table */
+    .recordings-table-container {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+
+    .recording-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      padding: 15px 20px;
+      border-bottom: 1px solid #f0f0f0;
+      align-items: center;
+      transition: background 0.2s;
+    }
+
+    .recording-row:hover {
+      background: #f8f9ff;
+    }
+
+    .recording-row.expanded {
+      background: #f0f4ff;
+    }
+
+    .recording-row-main {
+      cursor: pointer;
+    }
+
+    .recording-student {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .recording-email {
+      font-weight: 600;
+      color: #333;
+      font-size: 14px;
+    }
+
+    .recording-id {
+      font-size: 12px;
+      color: #888;
+    }
+
+    .recording-test {
+      font-size: 13px;
+      color: #555;
+      width: 120px;
+      flex-shrink: 0;
+    }
+
+    .recording-date {
+      font-size: 13px;
+      color: #666;
+      width: 90px;
+      flex-shrink: 0;
+    }
+
+    .recording-status {
+      width: 100px;
+      flex-shrink: 0;
+    }
+
+    .recording-actions {
+      display: flex;
+      gap: 8px;
+      width: 150px;
+      flex-shrink: 0;
+    }
+
+    .action-btn {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .action-btn-watch {
+      background: #667eea;
+      color: white;
+    }
+
+    .action-btn-watch:hover {
+      background: #5568d3;
+    }
+
+    .action-btn-expand {
+      background: #f0f0f0;
+      color: #555;
+    }
+
+    .action-btn-expand:hover {
+      background: #e0e0e0;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 6px;
+    }
+
+    .status-dot-pending {
+      background: #ffc107;
+    }
+
+    .status-dot-incomplete {
+      background: #dc3545;
+    }
+
+    .status-dot-graded {
+      background: #28a745;
+    }
+
+    /* Expanded Details */
+    .recording-details {
+      display: none;
+      width: 100%;
+      flex-basis: 100%;
+      padding: 20px;
+      background: #fafbff;
+      border-top: 1px solid #e0e0e0;
+      margin-top: 10px;
+    }
+
+    .recording-row.expanded .recording-details {
+      display: block;
+    }
+
+    .details-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+
+    .details-section {
+      background: white;
+      padding: 15px;
+      border-radius: 6px;
+      border: 1px solid #e0e0e0;
+    }
+
+    .details-section h4 {
+      margin: 0 0 12px 0;
+      font-size: 14px;
+      color: #333;
+      border-bottom: 1px solid #f0f0f0;
+      padding-bottom: 8px;
+    }
+
     .tab-nav {
       background: white;
       padding: 0 20px;
@@ -566,23 +761,39 @@
 
       <!-- Recordings Tab -->
       <div id="recordingsTab" class="tab-content active">
-        <div class="filter-bar">
-          <label>Filter by status:</label>
-          <select id="statusFilter" onchange="filterRecordings()">
-            <option value="all">All Recordings</option>
-            <option value="pending_review">Pending Review</option>
-            <option value="incomplete">Incomplete (Left Early)</option>
-            <option value="graded">Graded</option>
-          </select>
+        <!-- Search and Filters -->
+        <div class="filter-bar" style="flex-wrap: wrap; gap: 10px;">
+          <input type="text" id="searchInput" placeholder="Search by email or student ID..."
+            oninput="filterRecordings()"
+            style="flex: 1; min-width: 200px; padding: 10px 15px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px;">
 
-          <label style="margin-left: auto;">Sort by:</label>
-          <select id="sortFilter" onchange="filterRecordings()">
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">
+              All <span id="countAll" class="filter-count">0</span>
+            </button>
+            <button class="filter-btn" data-filter="pending_review" onclick="setFilter('pending_review')">
+              Pending <span id="countPending" class="filter-count">0</span>
+            </button>
+            <button class="filter-btn" data-filter="incomplete" onclick="setFilter('incomplete')">
+              Incomplete <span id="countIncomplete" class="filter-count">0</span>
+            </button>
+            <button class="filter-btn" data-filter="graded" onclick="setFilter('graded')">
+              Graded <span id="countGraded" class="filter-count">0</span>
+            </button>
+          </div>
+
+          <select id="sortFilter" onchange="filterRecordings()" style="padding: 10px; border-radius: 6px;">
             <option value="newest">Newest First</option>
             <option value="oldest">Oldest First</option>
           </select>
+
+          <button onclick="loadRecordings()" style="padding: 10px 15px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer;">
+            🔄 Refresh
+          </button>
         </div>
 
-        <div id="recordingsContainer">
+        <!-- Recordings Table -->
+        <div id="recordingsContainer" class="recordings-table-container">
           <div class="loading-spinner"></div>
         </div>
       </div>
@@ -686,6 +897,145 @@
       </div>
     </div>
   </div>
+
+  <!-- Multi-View Video Player Modal -->
+  <div id="multiViewModal" class="video-player-modal">
+    <div class="video-player-container" style="max-width: 1600px; height: 90vh;">
+      <div class="video-player-header">
+        <h3 id="multiViewTitle">Multi-View Playback</h3>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <span style="color: #aaa; font-size: 13px;">Click video to spotlight</span>
+          <button class="close-player-btn" onclick="closeMultiView()">✕ Close</button>
+        </div>
+      </div>
+      <div class="video-player-body" style="padding: 15px; flex-direction: column;">
+        <!-- Video Grid -->
+        <div id="multiViewGrid" style="display: grid; gap: 10px; flex: 1; min-height: 0;">
+          <!-- Main Camera -->
+          <div id="mvMain" class="mv-video-box" onclick="spotlightVideo('main')" style="grid-area: main;">
+            <video id="mvMainVideo" controls></video>
+            <div class="mv-label" style="background: #667eea;">📹 Main Camera</div>
+            <div class="mv-loading">Loading...</div>
+          </div>
+          <!-- Proctor Camera -->
+          <div id="mvProctor" class="mv-video-box" onclick="spotlightVideo('proctor')" style="grid-area: proctor;">
+            <video id="mvProctorVideo" controls></video>
+            <div class="mv-label" style="background: #4caf50;">📱 Proctor Camera</div>
+            <div class="mv-loading">Loading...</div>
+          </div>
+          <!-- Screen Recording -->
+          <div id="mvScreen" class="mv-video-box" onclick="spotlightVideo('screen')" style="grid-area: screen;">
+            <video id="mvScreenVideo" controls></video>
+            <div class="mv-label" style="background: #ff9800;">🖥️ Screen</div>
+            <div class="mv-loading">Loading...</div>
+          </div>
+        </div>
+        <!-- Sync Controls -->
+        <div style="background: #1a1a1a; padding: 15px; border-radius: 8px; margin-top: 10px; display: flex; gap: 15px; align-items: center;">
+          <button onclick="syncAllVideos()" style="background: #667eea; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+            🔄 Sync All
+          </button>
+          <button onclick="playAllVideos()" style="background: #4caf50; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+            ▶️ Play All
+          </button>
+          <button onclick="pauseAllVideos()" style="background: #f44336; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+            ⏸️ Pause All
+          </button>
+          <div style="flex: 1;"></div>
+          <span id="mvTimeDisplay" style="color: #aaa; font-size: 14px;">--:--</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    /* Multi-View Styles */
+    #multiViewGrid {
+      grid-template-columns: 2fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      grid-template-areas:
+        "main proctor"
+        "main screen";
+    }
+
+    #multiViewGrid.spotlight-main {
+      grid-template-columns: 3fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      grid-template-areas:
+        "main proctor"
+        "main screen";
+    }
+
+    #multiViewGrid.spotlight-proctor {
+      grid-template-columns: 1fr 3fr;
+      grid-template-rows: 1fr 1fr;
+      grid-template-areas:
+        "main proctor"
+        "screen proctor";
+    }
+
+    #multiViewGrid.spotlight-screen {
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 2fr;
+      grid-template-areas:
+        "main proctor"
+        "screen screen";
+    }
+
+    .mv-video-box {
+      position: relative;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: pointer;
+      border: 3px solid transparent;
+      transition: border-color 0.3s;
+    }
+
+    .mv-video-box:hover {
+      border-color: #667eea;
+    }
+
+    .mv-video-box.spotlight {
+      border-color: #ffd700;
+    }
+
+    .mv-video-box video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .mv-label {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      z-index: 10;
+    }
+
+    .mv-loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #aaa;
+      font-size: 14px;
+      display: none;
+    }
+
+    .mv-video-box.loading .mv-loading {
+      display: block;
+    }
+
+    .mv-video-box.loading video {
+      opacity: 0.3;
+    }
+  </style>
 
   <!-- Socket.io for live monitoring -->
   <script src="/socket.io/socket.io.js"></script>

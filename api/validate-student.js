@@ -29,7 +29,8 @@ module.exports = async (req, res) => {
       student: {
         email: student.email,
         studentId: student.studentId,
-        permittedTest: student.permittedTest,
+        permittedTests: student.permittedTests || [], // Array of permitted tests
+        permittedTest: student.permittedTest, // Backward compatibility: first test or null
         attempts: student.attempts,
       },
     });

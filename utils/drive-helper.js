@@ -121,9 +121,40 @@ async function listRecordings(folderId) {
   return response.data.files || [];
 }
 
+async function downloadFile(fileId, destPath) {
+  const drive = await getDrive();
+
+  const dest = fs.createWriteStream(destPath);
+
+  const response = await drive.files.get(
+    { fileId, alt: 'media' },
+    { responseType: 'stream' }
+  );
+
+  return new Promise((resolve, reject) => {
+    response.data
+      .on('end', () => resolve(destPath))
+      .on('error', (err) => reject(err))
+      .pipe(dest);
+  });
+}
+
+async function deleteFile(fileId) {
+  const drive = await getDrive();
+
+  await drive.files.delete({
+    fileId,
+    supportsAllDrives: true,
+  });
+
+  return true;
+}
+
 module.exports = {
   findOrCreateFolder,
   uploadFile,
   uploadBuffer,
   listRecordings,
+  downloadFile,
+  deleteFile,
 };

@@ -3,6 +3,8 @@ console.log('[Admin] admin.js script loaded at', new Date().toISOString());
 let adminEmail = null;
 let allRecordings = [];
 let filteredRecordings = [];
+let currentStatusFilter = 'all';
+let expandedRecordings = new Set();
 
 // Admin login
 document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) => {
@@ -67,8 +69,8 @@ async function loadRecordings() {
 
     if (result.success) {
       allRecordings = result.recordings;
-      filteredRecordings = allRecordings;
-      renderRecordings();
+      updateFilterCounts();
+      filterRecordings();
     } else {
       container.innerHTML = '<p style="text-align: center; color: #666;">Failed to load recordings</p>';
     }
@@ -78,15 +80,57 @@ async function loadRecordings() {
   }
 }
 
+function updateFilterCounts() {
+  const counts = {
+    all: allRecordings.length,
+    pending_review: allRecordings.filter(r => r.status === 'pending_review').length,
+    incomplete: allRecordings.filter(r => r.status === 'incomplete').length,
+    graded: allRecordings.filter(r => r.status === 'graded' || r.status === 'passed' || r.status === 'failed').length
+  };
+
+  document.getElementById('countAll').textContent = counts.all;
+  document.getElementById('countPending').textContent = counts.pending_review;
+  document.getElementById('countIncomplete').textContent = counts.incomplete;
+  document.getElementById('countGraded').textContent = counts.graded;
+}
+
+function setFilter(filter) {
+  currentStatusFilter = filter;
+
+  // Update active button
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === filter);
+  });
+
+  filterRecordings();
+}
+
 function filterRecordings() {
-  const statusFilter = document.getElementById('statusFilter').value;
+  const searchInput = document.getElementById('searchInput');
+  const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
   const sortFilter = document.getElementById('sortFilter').value;
 
+  // Start with all recordings
+  filteredRecordings = [...allRecordings];
+
   // Filter by status
-  if (statusFilter === 'all') {
-    filteredRecordings = [...allRecordings];
-  } else {
-    filteredRecordings = allRecordings.filter(r => r.status === statusFilter);
+  if (currentStatusFilter !== 'all') {
+    if (currentStatusFilter === 'graded') {
+      filteredRecordings = filteredRecordings.filter(r =>
+        r.status === 'graded' || r.status === 'passed' || r.status === 'failed'
+      );
+    } else {
+      filteredRecordings = filteredRecordings.filter(r => r.status === currentStatusFilter);
+    }
+  }
+
+  // Filter by search query
+  if (searchQuery) {
+    filteredRecordings = filteredRecordings.filter(r =>
+      r.email.toLowerCase().includes(searchQuery) ||
+      r.studentId.toLowerCase().includes(searchQuery) ||
+      (r.permittedTest && r.permittedTest.toLowerCase().includes(searchQuery))
+    );
   }
 
   // Sort
@@ -108,11 +152,160 @@ function renderRecordings() {
   const container = document.getElementById('recordingsContainer');
 
   if (filteredRecordings.length === 0) {
-    container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No recordings found</p>';
+    container.innerHTML = `
+      <div style="text-align: center; padding: 60px; color: #666;">
+        <div style="font-size: 48px; margin-bottom: 15px;">📹</div>
+        <p style="font-size: 16px; margin: 0;">No recordings found</p>
+        <p style="font-size: 13px; margin-top: 8px; color: #999;">Try adjusting your search or filter</p>
+      </div>
+    `;
     return;
   }
 
-  container.innerHTML = filteredRecordings.map(recording => createRecordingCard(recording)).join('');
+  // Table header
+  const header = `
+    <div class="recording-row" style="background: #f8f9fa; font-weight: 600; font-size: 12px; color: #666; text-transform: uppercase;">
+      <div>Student</div>
+      <div>Test</div>
+      <div>Date</div>
+      <div>Status</div>
+      <div>Actions</div>
+    </div>
+  `;
+
+  container.innerHTML = header + filteredRecordings.map(recording => createRecordingRow(recording)).join('');
+}
+
+function createRecordingRow(recording) {
+  const date = new Date(recording.uploadedAt);
+  const dateStr = date.toLocaleDateString();
+  const isExpanded = expandedRecordings.has(recording.sessionId);
+
+  let statusDot, statusText;
+  if (recording.status === 'incomplete') {
+    statusDot = 'status-dot-incomplete';
+    statusText = 'Incomplete';
+  } else if (recording.status === 'pending_review') {
+    statusDot = 'status-dot-pending';
+    statusText = 'Pending';
+  } else {
+    statusDot = 'status-dot-graded';
+    statusText = 'Graded';
+  }
+
+  const mainVideo = recording.videos.find(v => v.deviceType === 'main');
+  const proctorVideo = recording.videos.find(v => v.deviceType === 'proctor');
+  const duration = recording.duration ? (recording.duration === 'incomplete' ? 'Incomplete' : formatDuration(recording.duration)) : '--';
+
+  return `
+    <div class="recording-row ${isExpanded ? 'expanded' : ''}" id="row-${recording.sessionId}">
+      <div class="recording-student">
+        <span class="recording-email">${recording.email}</span>
+        <span class="recording-id">ID: ${recording.studentId}</span>
+      </div>
+      <div class="recording-test">${recording.permittedTest || 'N/A'}</div>
+      <div class="recording-date">${dateStr}</div>
+      <div class="recording-status">
+        <span class="status-dot ${statusDot}"></span>${statusText}
+      </div>
+      <div class="recording-actions">
+        <button class="action-btn action-btn-watch" onclick="openMultiView('${recording.sessionId}', '${recording.email}')">
+          Watch
+        </button>
+        <button class="action-btn action-btn-expand" onclick="toggleRecordingDetails('${recording.sessionId}')">
+          ${isExpanded ? 'Less' : 'More'}
+        </button>
+      </div>
+
+      <!-- Expandable Details -->
+      <div class="recording-details">
+        <div class="details-grid">
+          <!-- Video Options -->
+          <div class="details-section">
+            <h4>Video Options</h4>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <button class="action-btn action-btn-watch" onclick="openMultiView('${recording.sessionId}', '${recording.email}')">
+                All Cameras
+              </button>
+              ${mainVideo ? `<button class="action-btn" style="background: #5c6bc0; color: white;" onclick="openVideoPlayer('${recording.sessionId}', 'main', '${recording.email}')">Main Only</button>` : ''}
+              ${proctorVideo ? `<button class="action-btn" style="background: #26a69a; color: white;" onclick="openVideoPlayer('${recording.sessionId}', 'proctor', '${recording.email}')">Proctor Only</button>` : ''}
+            </div>
+            ${mainVideo ? `<a href="${mainVideo.webViewLink}" target="_blank" style="display: inline-block; margin-top: 10px; font-size: 12px; color: #667eea;">Open in Google Drive</a>` : ''}
+          </div>
+
+          <!-- Session Info -->
+          <div class="details-section">
+            <h4>Session Info</h4>
+            <div style="font-size: 13px; color: #555;">
+              <div style="margin-bottom: 6px;"><strong>Duration:</strong> ${duration}</div>
+              <div style="margin-bottom: 6px;"><strong>Interventions:</strong> ${recording.interventionCount || 0}</div>
+              <div style="margin-bottom: 6px;"><strong>Uploaded:</strong> ${date.toLocaleString()}</div>
+            </div>
+          </div>
+
+          <!-- Grading -->
+          <div class="details-section">
+            <h4>Grading</h4>
+            <form class="grade-form" onsubmit="submitGrade(event, '${recording.sessionId}')" style="gap: 10px;">
+              <select name="status" required style="padding: 8px; font-size: 13px;">
+                <option value="">Select Status</option>
+                <option value="passed" ${recording.status === 'passed' ? 'selected' : ''}>Passed</option>
+                <option value="failed" ${recording.status === 'failed' ? 'selected' : ''}>Failed</option>
+                <option value="needs_review" ${recording.status === 'needs_review' ? 'selected' : ''}>Needs Review</option>
+              </select>
+              <textarea name="notes" placeholder="Notes..." rows="2" style="font-size: 13px;">${recording.notes || ''}</textarea>
+              <button type="submit" style="padding: 8px 16px; font-size: 13px;">Save</button>
+            </form>
+          </div>
+
+          ${recording.chunkCount ? `
+          <!-- Combine Chunks -->
+          <div class="details-section">
+            <h4>Combine Chunks</h4>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              ${recording.chunkCount.main > 0 ? `
+                <button class="action-btn" style="background: #2196f3; color: white;"
+                  onclick="combineChunks('${recording.sessionFolderId}', 'main', '${recording.email}', '${recording.studentId}', this)">
+                  Main (${recording.chunkCount.main} chunks)
+                </button>
+              ` : ''}
+              ${recording.chunkCount.proctor > 0 ? `
+                <button class="action-btn" style="background: #2196f3; color: white;"
+                  onclick="combineChunks('${recording.sessionFolderId}', 'proctor', '${recording.email}', '${recording.studentId}', this)">
+                  Proctor (${recording.chunkCount.proctor} chunks)
+                </button>
+              ` : ''}
+            </div>
+          </div>
+          ` : ''}
+
+          ${recording.videos.some(v => v.needsConversion) ? `
+          <!-- Convert Videos -->
+          <div class="details-section">
+            <h4>Convert to MP4</h4>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              ${recording.videos.filter(v => v.needsConversion).map(v => `
+                <button class="action-btn" style="background: #ff9800; color: white;"
+                  onclick="convertVideo('${v.fileId}', '${recording.sessionFolderId}', '${v.fileName}', this)">
+                  ${v.deviceType}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+          ` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function toggleRecordingDetails(sessionId) {
+  if (expandedRecordings.has(sessionId)) {
+    expandedRecordings.delete(sessionId);
+  } else {
+    expandedRecordings.add(sessionId);
+  }
+  renderRecordings();
 }
 
 function createRecordingCard(recording) {
@@ -175,13 +368,50 @@ function createRecordingCard(recording) {
       </div>
 
       <div class="video-links">
-        ${mainVideo ? `<button class="video-link" onclick="openVideoPlayer('${recording.sessionId}', 'main', '${recording.email}')">▶️ View Main Camera</button>` : ''}
-        ${proctorVideo ? `<button class="video-link" onclick="openVideoPlayer('${recording.sessionId}', 'proctor', '${recording.email}')">▶️ View Proctor Camera</button>` : ''}
+        <button class="video-link" onclick="openMultiView('${recording.sessionId}', '${recording.email}')" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+          🎬 View All Cameras
+        </button>
+        ${mainVideo ? `<button class="video-link" onclick="openVideoPlayer('${recording.sessionId}', 'main', '${recording.email}')" style="background: #5c6bc0;">▶️ Main Only</button>` : ''}
+        ${proctorVideo ? `<button class="video-link" onclick="openVideoPlayer('${recording.sessionId}', 'proctor', '${recording.email}')" style="background: #26a69a;">▶️ Proctor Only</button>` : ''}
       </div>
       <div class="video-links" style="margin-top: 10px;">
         ${mainVideo ? `<a href="${mainVideo.webViewLink}" target="_blank" class="video-link" style="background: #6c757d; font-size: 13px; padding: 8px 16px;">📂 Main on Drive</a>` : ''}
         ${proctorVideo ? `<a href="${proctorVideo.webViewLink}" target="_blank" class="video-link" style="background: #6c757d; font-size: 13px; padding: 8px 16px;">📂 Proctor on Drive</a>` : ''}
       </div>
+      ${recording.videos.some(v => v.needsConversion) ? `
+        <div class="video-links" style="margin-top: 10px; background: #fff3cd; padding: 10px; border-radius: 6px;">
+          <span style="color: #856404; font-size: 13px; margin-right: 10px;">⚠️ WebM needs conversion for smooth playback:</span>
+          ${recording.videos.filter(v => v.needsConversion).map(v => `
+            <button
+              class="video-link convert-btn-${v.fileId}"
+              onclick="convertVideo('${v.fileId}', '${recording.sessionFolderId}', '${v.fileName}', this)"
+              style="background: #ff9800; font-size: 13px; padding: 8px 16px;">
+              🔄 Convert ${v.deviceType}
+            </button>
+          `).join('')}
+        </div>
+      ` : ''}
+      ${recording.chunkCount ? `
+        <div class="video-links" style="margin-top: 10px; background: #e3f2fd; padding: 10px; border-radius: 6px;">
+          <span style="color: #1565c0; font-size: 13px; display: block; margin-bottom: 8px;">🎬 Combine chunks into single video:</span>
+          ${recording.chunkCount.main > 0 ? `
+            <button
+              class="video-link combine-main-btn"
+              onclick="combineChunks('${recording.sessionFolderId}', 'main', '${recording.email}', '${recording.studentId}', this)"
+              style="background: #2196f3; font-size: 13px; padding: 8px 16px; margin-right: 8px;">
+              🔗 Combine Main (${recording.chunkCount.main} chunks)
+            </button>
+          ` : ''}
+          ${recording.chunkCount.proctor > 0 ? `
+            <button
+              class="video-link combine-proctor-btn"
+              onclick="combineChunks('${recording.sessionFolderId}', 'proctor', '${recording.email}', '${recording.studentId}', this)"
+              style="background: #2196f3; font-size: 13px; padding: 8px 16px;">
+              🔗 Combine Proctor (${recording.chunkCount.proctor} chunks)
+            </button>
+          ` : ''}
+        </div>
+      ` : ''}
 
       ${interventionsList}
 
@@ -208,6 +438,90 @@ function createRecordingCard(recording) {
       </div>
     </div>
   `;
+}
+
+async function convertVideo(fileId, folderId, fileName, button) {
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = '⏳ Converting...';
+  button.style.background = '#6c757d';
+
+  try {
+    const response = await fetch('/api/convert-video', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileId, folderId, fileName }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      button.textContent = '✓ Queued!';
+      button.style.background = '#28a745';
+
+      // Show success message
+      setTimeout(() => {
+        button.textContent = '✓ Converting in background';
+        button.style.opacity = '0.7';
+      }, 1500);
+    } else {
+      throw new Error(result.message);
+    }
+  } catch (error) {
+    console.error('Conversion error:', error);
+    button.textContent = '✗ Failed';
+    button.style.background = '#dc3545';
+
+    setTimeout(() => {
+      button.disabled = false;
+      button.textContent = originalText;
+      button.style.background = '#ff9800';
+    }, 3000);
+
+    alert('Conversion failed: ' + error.message);
+  }
+}
+
+async function combineChunks(sessionFolderId, deviceType, email, studentId, button) {
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = '⏳ Combining...';
+  button.style.background = '#6c757d';
+
+  try {
+    const response = await fetch('/api/combine-chunks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionFolderId, deviceType, email, studentId }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      button.textContent = '✓ Queued!';
+      button.style.background = '#28a745';
+
+      // Show success message
+      setTimeout(() => {
+        button.textContent = '✓ Combining in background';
+        button.style.opacity = '0.7';
+      }, 1500);
+    } else {
+      throw new Error(result.message);
+    }
+  } catch (error) {
+    console.error('Combine chunks error:', error);
+    button.textContent = '✗ Failed';
+    button.style.background = '#dc3545';
+
+    setTimeout(() => {
+      button.disabled = false;
+      button.textContent = originalText;
+      button.style.background = '#2196f3';
+    }, 3000);
+
+    alert('Combine chunks failed: ' + error.message);
+  }
 }
 
 async function submitGrade(event, sessionId) {
@@ -237,23 +551,31 @@ async function submitGrade(event, sessionId) {
 
     if (result.success) {
       button.textContent = '✓ Saved';
-      setTimeout(() => {
-        button.textContent = 'Save Grade';
-        button.disabled = false;
-      }, 2000);
 
-      // Reload recordings to reflect changes
-      await loadRecordings();
+      // Update the local recording data without reloading
+      const recording = allRecordings.find(r => r.sessionId === sessionId);
+      if (recording) {
+        recording.status = status;
+        recording.notes = notes;
+        recording.gradedBy = adminEmail;
+        recording.gradedAt = new Date().toISOString();
+        updateFilterCounts();
+      }
+
+      setTimeout(() => {
+        button.textContent = 'Save';
+        button.disabled = false;
+      }, 1500);
     } else {
       alert('Failed to save grade: ' + result.message);
       button.disabled = false;
-      button.textContent = 'Save Grade';
+      button.textContent = 'Save';
     }
   } catch (error) {
     console.error('Error saving grade:', error);
     alert('Error saving grade');
     button.disabled = false;
-    button.textContent = 'Save Grade';
+    button.textContent = 'Save';
   }
 }
 
@@ -719,6 +1041,167 @@ function closeLiveStream() {
 
 // Ensure switchTab is globally accessible
 window.switchTab = switchTab;
+
+// ====================
+// MULTI-VIEW VIDEO PLAYER
+// ====================
+
+let multiViewData = {
+  sessionId: null,
+  email: null,
+  videos: { main: null, proctor: null, screen: null },
+  currentSpotlight: 'main'
+};
+
+async function openMultiView(sessionId, email) {
+  multiViewData.sessionId = sessionId;
+  multiViewData.email = email;
+  multiViewData.currentSpotlight = 'main';
+
+  const modal = document.getElementById('multiViewModal');
+  const title = document.getElementById('multiViewTitle');
+  const grid = document.getElementById('multiViewGrid');
+
+  title.textContent = `Multi-View: ${email}`;
+  modal.classList.add('active');
+
+  // Reset grid layout
+  grid.className = '';
+
+  // Show loading state
+  ['Main', 'Proctor', 'Screen'].forEach(type => {
+    const box = document.getElementById(`mv${type}`);
+    box.classList.add('loading');
+    box.classList.remove('spotlight');
+  });
+
+  // Fetch chunks for each device type
+  const deviceTypes = ['main', 'proctor', 'screen'];
+
+  for (const deviceType of deviceTypes) {
+    try {
+      const response = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
+      const result = await response.json();
+
+      const boxId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`;
+      const videoId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}Video`;
+      const box = document.getElementById(boxId);
+      const video = document.getElementById(videoId);
+
+      if (result.success && result.chunks && result.chunks.length > 0) {
+        // Use the first chunk or combined video
+        const firstChunk = result.chunks[0];
+        video.src = firstChunk.downloadUrl;
+        video.load();
+        multiViewData.videos[deviceType] = video;
+
+        video.onloadeddata = () => {
+          box.classList.remove('loading');
+        };
+
+        video.onerror = () => {
+          box.classList.remove('loading');
+          console.error(`Failed to load ${deviceType} video`);
+        };
+      } else {
+        // No video for this device type
+        box.classList.remove('loading');
+        video.src = '';
+        const label = box.querySelector('.mv-label');
+        label.textContent += ' (No recording)';
+      }
+    } catch (error) {
+      console.error(`Error loading ${deviceType} video:`, error);
+      const boxId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`;
+      document.getElementById(boxId).classList.remove('loading');
+    }
+  }
+
+  // Set initial spotlight
+  spotlightVideo('main');
+}
+
+function spotlightVideo(deviceType) {
+  const grid = document.getElementById('multiViewGrid');
+
+  // Remove all spotlight classes
+  grid.className = '';
+  document.querySelectorAll('.mv-video-box').forEach(box => box.classList.remove('spotlight'));
+
+  // Add spotlight class
+  grid.classList.add(`spotlight-${deviceType}`);
+  const boxId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`;
+  document.getElementById(boxId).classList.add('spotlight');
+
+  multiViewData.currentSpotlight = deviceType;
+}
+
+function syncAllVideos() {
+  // Get the current time of the spotlight video
+  const spotlightVideo = multiViewData.videos[multiViewData.currentSpotlight];
+  if (!spotlightVideo) return;
+
+  const currentTime = spotlightVideo.currentTime;
+
+  // Sync all other videos to this time
+  Object.values(multiViewData.videos).forEach(video => {
+    if (video && video !== spotlightVideo) {
+      video.currentTime = currentTime;
+    }
+  });
+
+  console.log(`Synced all videos to ${currentTime.toFixed(1)}s`);
+}
+
+function playAllVideos() {
+  Object.values(multiViewData.videos).forEach(video => {
+    if (video) {
+      video.play().catch(err => console.log('Play failed:', err));
+    }
+  });
+}
+
+function pauseAllVideos() {
+  Object.values(multiViewData.videos).forEach(video => {
+    if (video) {
+      video.pause();
+    }
+  });
+}
+
+function closeMultiView() {
+  const modal = document.getElementById('multiViewModal');
+  modal.classList.remove('active');
+
+  // Stop all videos
+  Object.values(multiViewData.videos).forEach(video => {
+    if (video) {
+      video.pause();
+      video.src = '';
+    }
+  });
+
+  multiViewData = {
+    sessionId: null,
+    email: null,
+    videos: { main: null, proctor: null, screen: null },
+    currentSpotlight: 'main'
+  };
+}
+
+// Update time display
+setInterval(() => {
+  const modal = document.getElementById('multiViewModal');
+  if (modal.classList.contains('active')) {
+    const video = multiViewData.videos[multiViewData.currentSpotlight];
+    if (video && !isNaN(video.currentTime)) {
+      const time = video.currentTime;
+      const mins = Math.floor(time / 60);
+      const secs = Math.floor(time % 60);
+      document.getElementById('mvTimeDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+  }
+}, 500);
 
 // Verification log at end of script
 console.log('[Admin] Script fully loaded');

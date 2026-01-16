@@ -44,6 +44,28 @@
       </p>
     </div>
 
+    <!-- Page 2: Test Selection (shown when student has multiple permitted tests) -->
+    <div id="pageTestSelection" class="page">
+      <h1>Select Your Exam</h1>
+      <p>You have been assigned multiple exams. Please select the one you want to take today.</p>
+
+      <div id="testSelectionError" class="error-message" style="display: none;"></div>
+
+      <div id="testSelectionContainer" style="max-width: 600px; margin: 30px auto;">
+        <!-- Test options will be populated dynamically -->
+      </div>
+
+      <div style="text-align: center; margin-top: 30px;">
+        <button id="selectTestBtn" onclick="confirmTestSelection()" disabled style="background: linear-gradient(135deg, #00897b 0%, #00695c 100%); color: white; border: none; padding: 15px 40px; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; opacity: 0.5;">
+          Continue with Selected Exam
+        </button>
+      </div>
+
+      <p style="text-align: center; margin-top: 20px; color: #888; font-size: 14px;">
+        <strong>Note:</strong> Once you start the exam, you cannot switch to a different one.
+      </p>
+    </div>
+
     <!-- Page 4: Camera/Mic Permissions (MOVED BEFORE PROCTOR) -->
     <div id="page4" class="page">
       <h1>Camera & Microphone Setup</h1>

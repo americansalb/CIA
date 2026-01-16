@@ -5,6 +5,7 @@ let mainRecorder = null;
 let screenRecorder = null;
 let proctorRecorder = null;
 let interventionRecorder = null;
+let audioRecorder = null; // Separate high-quality audio recording
 let mainStream = null;
 let screenStream = null;
 let testStartTime = null;
@@ -79,6 +80,9 @@ function replayInstructionsAudio() {
   }
 }
 
+// Selected test (when multiple tests are available)
+let selectedTest = null;
+
 // Login form handler
 document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -110,74 +114,22 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
 
     if (result.success) {
       studentData = result.student;
+      console.log('Student data:', studentData);
+      console.log('Permitted tests:', studentData.permittedTests);
 
-      // Create session
-      const sessionResponse = await fetch('/api/create-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: studentData.email,
-          studentId: studentData.studentId,
-          permittedTest: studentData.permittedTest,
-        }),
-      });
-
-      const sessionResult = await sessionResponse.json();
-      if (sessionResult.success) {
-        sessionData = sessionResult;
-
-        // Set session ID for error logging
-        errorLogger.setSessionId(sessionData.sessionId);
-        console.log('✓ Error logging initialized for session:', sessionData.sessionId);
-
-        // Check for unfinished sessions for this user
-        checkForRecovery(studentData.email);
-
-        // Load test configuration from Google Sheets
-        const testConfigResponse = await fetch(`/api/test-config?testName=${encodeURIComponent(studentData.permittedTest)}`);
-        const testConfigResult = await testConfigResponse.json();
-
-        if (!testConfigResult.success || !testConfigResult.config || testConfigResult.config.segments.length === 0) {
-          throw new Error(`Test "${studentData.permittedTest}" has not been configured yet. Please contact your administrator.`);
-        }
-
-        testConfig = testConfigResult.config;
-
-        // Load universal instructions config (but don't show yet)
-        const universalResponse = await fetch('/api/test-config?testName=_UNIVERSAL_INSTRUCTIONS');
-        const universalResult = await universalResponse.json();
-
-        console.log('universalResult:', universalResult);
-        console.log('universalResult.config.warmupSegments:', universalResult.config?.warmupSegments);
-        console.log('universalResult.config.warmupAudioUrl:', universalResult.config?.warmupAudioUrl);
-
-        // Store warmup segments/URL if available
-        if (universalResult.success && universalResult.config) {
-          if (universalResult.config.warmupSegments && universalResult.config.warmupSegments.length > 0) {
-            testConfig.warmupSegments = universalResult.config.warmupSegments;
-            console.log('✓ Loaded', testConfig.warmupSegments.length, 'warmup segments into testConfig:', testConfig.warmupSegments);
-          } else if (universalResult.config.warmupAudioUrl) {
-            testConfig.warmupAudioUrl = universalResult.config.warmupAudioUrl;
-            console.log('✓ Loaded warmup URL into testConfig:', testConfig.warmupAudioUrl);
-          } else {
-            console.warn('✗ No warmup found in universal config!');
-          }
-          // Store instructions URL for later
-          testConfig.universalInstructionsUrl = universalResult.config.segments?.[0] || null;
-        } else {
-          console.error('✗ universalResult failed or no config!');
-        }
-
-        // Practice mode: Skip ALL proctoring (camera, screen share, proctor device)
-        if (isPracticeMode) {
-          console.log('PRACTICE MODE: Skipping all proctoring, going directly to test instructions');
-          showPage('page5');
-        } else {
-          // Normal mode: Go to camera/mic setup
-          showPage('page4');
-        }
+      // Check if student has multiple permitted tests
+      if (studentData.permittedTests && studentData.permittedTests.length > 1) {
+        // Show test selection page
+        showTestSelectionPage(studentData.permittedTests);
+      } else if (studentData.permittedTests && studentData.permittedTests.length === 1) {
+        // Single test - proceed directly
+        studentData.permittedTest = studentData.permittedTests[0];
+        await proceedAfterTestSelection();
+      } else if (studentData.permittedTest) {
+        // Backward compatibility: single permittedTest field
+        await proceedAfterTestSelection();
       } else {
-        throw new Error(sessionResult.message);
+        throw new Error('No tests have been assigned to you. Please contact your administrator.');
       }
     } else {
       errorDiv.textContent = result.message;
@@ -191,6 +143,175 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
     loginBtn.textContent = 'Continue';
   }
 });
+
+// Show test selection page with available tests
+function showTestSelectionPage(permittedTests) {
+  const container = document.getElementById('testSelectionContainer');
+  container.innerHTML = '';
+
+  permittedTests.forEach((testName, index) => {
+    const testOption = document.createElement('div');
+    testOption.className = 'test-option';
+    testOption.style.cssText = `
+      background: white;
+      border: 3px solid #e0e0e0;
+      border-radius: 12px;
+      padding: 20px;
+      margin: 15px 0;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    `;
+
+    testOption.innerHTML = `
+      <div style="width: 30px; height: 30px; border: 3px solid #00897b; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+        <div class="test-option-check" style="width: 16px; height: 16px; background: #00897b; border-radius: 50%; display: none;"></div>
+      </div>
+      <div>
+        <div style="font-size: 18px; font-weight: 600; color: #333;">${escapeHtml(testName)}</div>
+        <div style="font-size: 14px; color: #888; margin-top: 4px;">Option ${index + 1} of ${permittedTests.length}</div>
+      </div>
+    `;
+
+    testOption.addEventListener('click', () => selectTest(testName, testOption));
+    testOption.addEventListener('mouseenter', () => {
+      if (selectedTest !== testName) {
+        testOption.style.borderColor = '#b2dfdb';
+        testOption.style.background = '#f5f5f5';
+      }
+    });
+    testOption.addEventListener('mouseleave', () => {
+      if (selectedTest !== testName) {
+        testOption.style.borderColor = '#e0e0e0';
+        testOption.style.background = 'white';
+      }
+    });
+
+    container.appendChild(testOption);
+  });
+
+  showPage('pageTestSelection');
+}
+
+// Handle test selection
+function selectTest(testName, element) {
+  selectedTest = testName;
+
+  // Update visual state of all options
+  document.querySelectorAll('.test-option').forEach(opt => {
+    opt.style.borderColor = '#e0e0e0';
+    opt.style.background = 'white';
+    opt.querySelector('.test-option-check').style.display = 'none';
+  });
+
+  // Highlight selected option
+  element.style.borderColor = '#00897b';
+  element.style.background = '#e0f2f1';
+  element.querySelector('.test-option-check').style.display = 'block';
+
+  // Enable continue button
+  const selectBtn = document.getElementById('selectTestBtn');
+  selectBtn.disabled = false;
+  selectBtn.style.opacity = '1';
+}
+
+// Confirm test selection and proceed
+async function confirmTestSelection() {
+  if (!selectedTest) {
+    alert('Please select an exam first.');
+    return;
+  }
+
+  const selectBtn = document.getElementById('selectTestBtn');
+  selectBtn.disabled = true;
+  selectBtn.textContent = 'Loading...';
+
+  try {
+    // Set the selected test as the permitted test
+    studentData.permittedTest = selectedTest;
+    await proceedAfterTestSelection();
+  } catch (error) {
+    const errorDiv = document.getElementById('testSelectionError');
+    errorDiv.textContent = `Error: ${error.message}`;
+    errorDiv.style.display = 'block';
+    selectBtn.disabled = false;
+    selectBtn.textContent = 'Continue with Selected Exam';
+  }
+}
+
+// Continue after test selection (common flow for single and multiple tests)
+async function proceedAfterTestSelection() {
+  // Create session
+  const sessionResponse = await fetch('/api/create-session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: studentData.email,
+      studentId: studentData.studentId,
+      permittedTest: studentData.permittedTest,
+    }),
+  });
+
+  const sessionResult = await sessionResponse.json();
+  if (sessionResult.success) {
+    sessionData = sessionResult;
+
+    // Set session ID for error logging
+    errorLogger.setSessionId(sessionData.sessionId);
+    console.log('✓ Error logging initialized for session:', sessionData.sessionId);
+
+    // Check for unfinished sessions for this user
+    checkForRecovery(studentData.email);
+
+    // Load test configuration from Google Sheets
+    const testConfigResponse = await fetch(`/api/test-config?testName=${encodeURIComponent(studentData.permittedTest)}`);
+    const testConfigResult = await testConfigResponse.json();
+
+    if (!testConfigResult.success || !testConfigResult.config || testConfigResult.config.segments.length === 0) {
+      throw new Error(`Test "${studentData.permittedTest}" has not been configured yet. Please contact your administrator.`);
+    }
+
+    testConfig = testConfigResult.config;
+
+    // Load universal instructions config (but don't show yet)
+    const universalResponse = await fetch('/api/test-config?testName=_UNIVERSAL_INSTRUCTIONS');
+    const universalResult = await universalResponse.json();
+
+    console.log('universalResult:', universalResult);
+    console.log('universalResult.config.warmupSegments:', universalResult.config?.warmupSegments);
+    console.log('universalResult.config.warmupAudioUrl:', universalResult.config?.warmupAudioUrl);
+
+    // Store warmup segments/URL if available
+    if (universalResult.success && universalResult.config) {
+      if (universalResult.config.warmupSegments && universalResult.config.warmupSegments.length > 0) {
+        testConfig.warmupSegments = universalResult.config.warmupSegments;
+        console.log('✓ Loaded', testConfig.warmupSegments.length, 'warmup segments into testConfig:', testConfig.warmupSegments);
+      } else if (universalResult.config.warmupAudioUrl) {
+        testConfig.warmupAudioUrl = universalResult.config.warmupAudioUrl;
+        console.log('✓ Loaded warmup URL into testConfig:', testConfig.warmupAudioUrl);
+      } else {
+        console.warn('✗ No warmup found in universal config!');
+      }
+      // Store instructions URL for later
+      testConfig.universalInstructionsUrl = universalResult.config.segments?.[0] || null;
+    } else {
+      console.error('✗ universalResult failed or no config!');
+    }
+
+    // Practice mode: Skip ALL proctoring (camera, screen share, proctor device)
+    if (isPracticeMode) {
+      console.log('PRACTICE MODE: Skipping all proctoring, going to test instructions');
+      showPage('pageTestInstructions');
+    } else {
+      // Normal mode: Go to camera/mic setup
+      showPage('page4');
+    }
+  } else {
+    throw new Error(sessionResult.message);
+  }
+}
 
 // Show proctor setup when moving to page 3
 function setupProctorPage() {
@@ -411,27 +532,33 @@ async function requestPermissions() {
       analyser.getByteFrequencyData(dataArray);
       const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
 
-      const micLevelEl = document.getElementById('micLevel');
-      if (micLevelEl) {
-        micLevelEl.textContent = average > 5 ? '✓ Working' : 'Speak to test...';
+      const micStatusEl = document.getElementById('micStatus');
+
+      if (average > 5) {
+        // Sound detected - mic is working
+        if (!micWorking) {
+          micWorking = true;
+          if (micStatusEl) {
+            micStatusEl.innerHTML = '<span style="color: #4caf50;">✓ Microphone working</span>';
+          }
+          checkIfReadyToContinue();
+        }
+      } else {
+        // No sound - show prompt with audio level bar
+        if (micStatusEl && !micWorking) {
+          const barWidth = Math.min(average * 10, 100);
+          micStatusEl.innerHTML = `
+            <span style="color: #ff9800;">Say "testing" into your microphone</span>
+            <div style="background: #eee; height: 8px; border-radius: 4px; margin-top: 5px; width: 150px;">
+              <div style="background: #4caf50; height: 100%; border-radius: 4px; width: ${barWidth}%; transition: width 0.1s;"></div>
+            </div>
+          `;
+        }
       }
 
-      if (average > 5 && !micWorking) {
-        micWorking = true;
-        const micStatusEl = document.getElementById('micStatus');
-        if (micStatusEl) {
-          micStatusEl.innerHTML = '<span style="color: #4caf50;">✓ Microphone is working</span>';
-        }
-        checkIfReadyToContinue();
-      } else if (!micWorking && checkCount < maxChecks) {
+      // Keep checking until mic works
+      if (!micWorking) {
         requestAnimationFrame(checkAudio);
-      } else if (!micWorking) {
-        // After 5 seconds, allow continuing even if mic wasn't detected
-        const micStatusEl = document.getElementById('micStatus');
-        if (micStatusEl) {
-          micStatusEl.innerHTML = '<span style="color: #ff9800;">⚠ No sound detected (may still work)</span>';
-        }
-        checkIfReadyToContinue();
       }
     }
 
@@ -846,13 +973,14 @@ async function requestScreenShareAndContinue() {
 
   while (attempts < maxAttempts) {
     try {
+      // Request screen share - prefer entire monitor
       screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           cursor: 'always',
-          displaySurface: 'monitor', // Prefer entire screen
+          displaySurface: 'monitor',
         },
         audio: false,
-        preferCurrentTab: false, // Don't allow tab sharing
+        preferCurrentTab: false,
       });
 
       // CRITICAL: Validate they actually shared entire screen, not just a window/tab
@@ -900,9 +1028,9 @@ async function requestScreenShareAndContinue() {
         continue; // Loop and try again
       }
     } catch (error) {
-      console.error('Screen sharing error:', error);
+      console.error('Screen sharing error:', error.name, error.message);
 
-      // User cancelled or error occurred
+      // User cancelled
       if (error.name === 'NotAllowedError' || error.name === 'AbortError') {
         alert('Screen sharing is REQUIRED. You cannot take the test without sharing your entire screen.');
         attempts++;
@@ -912,11 +1040,20 @@ async function requestScreenShareAndContinue() {
           return;
         }
         continue;
-      } else {
-        // Other error
-        alert('Failed to access screen sharing: ' + error.message);
+      }
+
+      // Any other error - retry automatically
+      console.log('Screen share attempt failed, retrying...', attempts + 1);
+      attempts++;
+
+      if (attempts >= maxAttempts) {
+        alert('Screen sharing failed after multiple attempts. Please refresh the page and try again.\n\nError: ' + error.message);
         return;
       }
+
+      // Wait a moment before retrying
+      await new Promise(resolve => setTimeout(resolve, 500));
+      continue;
     }
   }
 
@@ -965,6 +1102,16 @@ showPage = async function(pageId) {
         } catch (error) {
           console.error('Screen recording error:', error);
         }
+      }
+
+      // Initialize separate audio-only recording (mic + screen audio mixed)
+      try {
+        audioRecorder = new AudioRecordingManager(sessionData.sessionId);
+        await audioRecorder.startRecording(mainStream, screenStream);
+        console.log('Audio-only recording started');
+      } catch (error) {
+        console.error('Audio recording error:', error);
+        // Continue without audio-only recording
       }
 
       // Start continuous quality monitoring during test
@@ -1546,6 +1693,9 @@ async function submitTest() {
     if (screenRecorder) {
       await screenRecorder.stopRecording();
     }
+    if (audioRecorder) {
+      await audioRecorder.stopRecording();
+    }
 
     // Navigate to completion page
     showPage('page6');
@@ -1707,6 +1857,12 @@ async function endTest(reason = 'Test completed') {
     await screenRecorder.stopRecording();
     await screenRecorder.uploadFinalVideo(0);
     screenRecorder.stopStream();
+  }
+
+  // Stop audio-only recording
+  if (audioRecorder) {
+    await audioRecorder.stopRecording();
+    audioRecorder.stopStream();
   }
 
   // Stop screen stream
@@ -2396,11 +2552,14 @@ function openPreSessionModal() {
       return;
     }
 
-    // Update title and description based on warmup vs test
+    // Update title and description based on warmup vs test vs practice mode
     const title = document.getElementById('preSessionTitle');
     const description = document.getElementById('preSessionDescription');
 
-    if (isWarmupMode) {
+    if (isPracticeMode) {
+      if (title) title.textContent = 'Practice Mode Pre-Session';
+      if (description) description.innerHTML = 'This is <strong>practice mode</strong> (not graded). Please perform both <strong>pre-session for patient and provider</strong> now.';
+    } else if (isWarmupMode) {
       if (title) title.textContent = 'Warmup Pre-Session';
       if (description) description.innerHTML = 'This is the <strong>practice warmup</strong>. Please perform both <strong>pre-session for patient and provider</strong> now.';
     } else {

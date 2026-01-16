@@ -105,6 +105,9 @@ module.exports = async (req, res) => {
       // Clean up temp file
       fs.unlinkSync(videoFile[0].filepath);
 
+      // Log successful upload for debugging
+      console.log(`✓ Chunk uploaded: ${session.email} | ${deviceType[0]} chunk ${chunkNumber[0]} | fileId: ${uploadResult.fileId}`);
+
       res.json({
         success: true,
         message: 'Chunk uploaded successfully',

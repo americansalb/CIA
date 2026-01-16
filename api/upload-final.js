@@ -2,6 +2,7 @@ const formidable = require('formidable');
 const fs = require('fs');
 const { findOrCreateFolder, uploadBuffer } = require('../utils/drive-helper');
 const { sessions } = require('./create-session');
+const { queueConversion } = require('../utils/video-converter');
 
 module.exports = async (req, res) => {
   const form = new formidable.IncomingForm({
@@ -75,6 +76,16 @@ module.exports = async (req, res) => {
 
       // Clean up temp file
       fs.unlinkSync(videoFile[0].filepath);
+
+      // Log successful final upload
+      console.log(`✓ FINAL video uploaded: ${session.email} | ${deviceType[0]} | duration: ${duration ? duration[0] : 'unknown'}s | fileId: ${uploadResult.fileId}`);
+
+      // Queue background conversion to seekable MP4 (fire-and-forget)
+      // This runs after user gets their response, so they don't have to wait
+      if (fileExtension === 'webm') {
+        console.log(`Queueing background conversion for: ${fileName}`);
+        queueConversion(uploadResult.fileId, sessionFolderId, fileName);
+      }
 
       res.json({
         success: true,
