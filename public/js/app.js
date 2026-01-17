@@ -1022,17 +1022,41 @@ async function requestScreenShareAndContinue() {
       alert('Screen sharing was stopped. This may affect your test submission.');
     });
 
-    // Re-acquire camera
+    // Re-acquire camera WITH audio for recording
     try {
       mainStream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
       });
       if (previewVideo) {
         previewVideo.srcObject = mainStream;
       }
     } catch (camErr) {
       console.error('Failed to re-acquire camera:', camErr);
+    }
+
+    // Start recording immediately after screen share is granted
+    if (mainStream && sessionData && sessionData.sessionId) {
+      try {
+        // Initialize camera recorder
+        mainRecorder = new RecordingManager('main', sessionData.sessionId);
+        await mainRecorder.startRecording(mainStream);
+        console.log('Camera recording started (pre-session)');
+
+        // Initialize screen recorder
+        if (screenStream) {
+          screenRecorder = new RecordingManager('screen', sessionData.sessionId);
+          await screenRecorder.startRecording(screenStream);
+          console.log('Screen recording started (pre-session)');
+        }
+
+        // Initialize audio recording
+        audioRecorder = new AudioRecordingManager(sessionData.sessionId);
+        await audioRecorder.startRecording(mainStream, screenStream);
+        console.log('Audio recording started (pre-session)');
+      } catch (recErr) {
+        console.error('Failed to start pre-session recording:', recErr);
+      }
     }
 
     showPage('page3');
@@ -1084,29 +1108,40 @@ showPage = async function(pageId) {
     if (mainStream) {
       document.getElementById('mainVideo').srcObject = mainStream;
 
-      // Initialize camera recorder
-      mainRecorder = new RecordingManager('main', sessionData.sessionId);
-      await mainRecorder.startRecording(mainStream);
+      // Only start recording if not already started (recording may have started at screen share)
+      if (!mainRecorder) {
+        mainRecorder = new RecordingManager('main', sessionData.sessionId);
+        await mainRecorder.startRecording(mainStream);
+        console.log('Camera recording started (page5)');
+      } else {
+        console.log('Camera recording already running (started at screen share)');
+      }
 
       // Initialize screen recorder if screen share was granted earlier
-      if (screenStream) {
+      if (screenStream && !screenRecorder) {
         try {
           screenRecorder = new RecordingManager('screen', sessionData.sessionId);
           await screenRecorder.startRecording(screenStream);
-          console.log('Screen recording started');
+          console.log('Screen recording started (page5)');
         } catch (error) {
           console.error('Screen recording error:', error);
         }
+      } else if (screenRecorder) {
+        console.log('Screen recording already running (started at screen share)');
       }
 
       // Initialize separate audio-only recording (mic + screen audio mixed)
-      try {
-        audioRecorder = new AudioRecordingManager(sessionData.sessionId);
-        await audioRecorder.startRecording(mainStream, screenStream);
-        console.log('Audio-only recording started');
-      } catch (error) {
-        console.error('Audio recording error:', error);
-        // Continue without audio-only recording
+      if (!audioRecorder) {
+        try {
+          audioRecorder = new AudioRecordingManager(sessionData.sessionId);
+          await audioRecorder.startRecording(mainStream, screenStream);
+          console.log('Audio recording started (page5)');
+        } catch (error) {
+          console.error('Audio recording error:', error);
+          // Continue without audio-only recording
+        }
+      } else {
+        console.log('Audio recording already running (started at screen share)');
       }
 
       // Start continuous quality monitoring during test
