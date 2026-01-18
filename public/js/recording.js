@@ -894,7 +894,7 @@ class AudioRecordingManager {
     if (this.mediaRecorder?.mimeType?.includes('mp4')) extension = 'm4a';
     else if (this.mediaRecorder?.mimeType?.includes('ogg')) extension = 'ogg';
 
-    formData.append('chunk', blob, `audio_chunk_${String(this.chunkNumber).padStart(3, '0')}.${extension}`);
+    formData.append('video', blob, `audio_chunk_${String(this.chunkNumber).padStart(3, '0')}.${extension}`);
     formData.append('sessionId', this.sessionId);
     formData.append('deviceType', 'audio'); // Special type for audio-only
     formData.append('chunkNumber', this.chunkNumber);
