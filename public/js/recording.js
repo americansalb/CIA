@@ -572,8 +572,10 @@ class RecordingManager {
 
       // Update progress every second
       if (this.deviceType === 'main') {
-        const percentComplete = Math.floor((status.uploadedChunks / status.totalChunks) * 100);
-        this.updateUploadProgress(percentComplete, `Uploaded ${status.uploadedChunks} of ${status.totalChunks} segments...`);
+        // Cap at 100% to prevent display issues
+        const percentComplete = Math.min(100, Math.floor((status.uploadedChunks / Math.max(1, status.totalChunks)) * 100));
+        const displayUploaded = Math.min(status.uploadedChunks, status.totalChunks);
+        this.updateUploadProgress(percentComplete, `Uploaded ${displayUploaded} of ${status.totalChunks} segments...`);
       }
 
       console.log(`[${this.deviceType}] Upload progress: ${status.uploadedChunks}/${status.totalChunks} (${this.uploadQueue.length} in queue)`);
@@ -612,6 +614,13 @@ class RecordingManager {
     // Final progress update
     if (this.deviceType === 'main') {
       this.updateUploadProgress(100, 'Upload complete! ✓');
+      // Hide the warning and show success message
+      const warningDiv = document.getElementById('uploadWarning');
+      if (warningDiv) {
+        warningDiv.style.background = '#d4edda';
+        warningDiv.style.borderColor = '#28a745';
+        warningDiv.innerHTML = '<p style="margin: 0; font-size: 14px; color: #155724;"><strong>✓ Upload complete!</strong><br>You may now close this window.</p>';
+      }
       await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause to show 100%
     }
 
