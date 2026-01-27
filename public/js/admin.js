@@ -82,7 +82,6 @@ async function loadRecordings() {
       practiceAttempts = practiceResult.attempts;
     }
 
-    updateFilterCounts();
     filterRecordings();
   } catch (error) {
     console.error('Error loading recordings:', error);
