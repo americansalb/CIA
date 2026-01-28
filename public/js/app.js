@@ -138,14 +138,19 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
       studentData = result.student;
       console.log('Student data:', studentData);
       console.log('Permitted tests:', studentData.permittedTests);
+      console.log('Permitted tests with names:', studentData.permittedTestsWithNames);
+
+      // Use permittedTestsWithNames if available (includes display names)
+      const testsWithNames = studentData.permittedTestsWithNames ||
+        (studentData.permittedTests || []).map(name => ({ name, displayName: name }));
 
       // Check if student has multiple permitted tests
-      if (studentData.permittedTests && studentData.permittedTests.length > 1) {
-        // Show test selection page
-        showTestSelectionPage(studentData.permittedTests);
-      } else if (studentData.permittedTests && studentData.permittedTests.length === 1) {
+      if (testsWithNames.length > 1) {
+        // Show test selection page with display names
+        showTestSelectionPage(testsWithNames);
+      } else if (testsWithNames.length === 1) {
         // Single test - proceed directly
-        studentData.permittedTest = studentData.permittedTests[0];
+        studentData.permittedTest = testsWithNames[0].name;
         await proceedAfterTestSelection();
       } else if (studentData.permittedTest) {
         // Backward compatibility: single permittedTest field
@@ -167,11 +172,16 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
 });
 
 // Show test selection page with available tests
-function showTestSelectionPage(permittedTests) {
+// testsWithNames is an array of { name: internalName, displayName: externalName }
+function showTestSelectionPage(testsWithNames) {
   const container = document.getElementById('testSelectionContainer');
   container.innerHTML = '';
 
-  permittedTests.forEach((testName, index) => {
+  testsWithNames.forEach((test, index) => {
+    // Support both old format (string) and new format (object with name/displayName)
+    const testName = typeof test === 'string' ? test : test.name;
+    const displayName = typeof test === 'string' ? test : test.displayName;
+
     const testOption = document.createElement('div');
     testOption.className = 'test-option';
     testOption.style.cssText = `
@@ -192,8 +202,8 @@ function showTestSelectionPage(permittedTests) {
         <div class="test-option-check" style="width: 16px; height: 16px; background: #00897b; border-radius: 50%; display: none;"></div>
       </div>
       <div>
-        <div style="font-size: 18px; font-weight: 600; color: #333;">${escapeHtml(testName)}</div>
-        <div style="font-size: 14px; color: #888; margin-top: 4px;">Option ${index + 1} of ${permittedTests.length}</div>
+        <div style="font-size: 18px; font-weight: 600; color: #333;">${escapeHtml(displayName)}</div>
+        <div style="font-size: 14px; color: #888; margin-top: 4px;">Option ${index + 1} of ${testsWithNames.length}</div>
       </div>
     `;
 

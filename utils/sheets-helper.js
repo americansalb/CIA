@@ -97,8 +97,9 @@ async function getAllTests() {
     const allTests = new Set();
 
     // Get configured tests from Tests sheet FIRST (primary source of truth)
-    const testsRange = process.env.TESTS_SHEET_RANGE || 'Tests!A:D';
+    const testsRange = 'Tests!A:G'; // Extended to include External_Name
     const testConfigs = {};
+    const testExternalNames = {};
 
     try {
       const testsResponse = await sheets.spreadsheets.values.get({
@@ -110,7 +111,7 @@ async function getAllTests() {
 
       // Parse test configurations
       for (let i = 1; i < testRows.length; i++) {
-        const [testName, segmentNum, audioUrl, status] = testRows[i];
+        const [testName, segmentNum, audioUrl, status, , , externalName] = testRows[i];
         if (testName) {
           allTests.add(testName);
           if (!testConfigs[testName]) {
@@ -121,6 +122,10 @@ async function getAllTests() {
             audioUrl,
             status: status || 'active',
           });
+          // Store external name (only need to capture once per test)
+          if (!testExternalNames[testName]) {
+            testExternalNames[testName] = externalName || testName; // Default to internal name
+          }
         }
       }
     } catch (error) {
@@ -157,6 +162,7 @@ async function getAllTests() {
     // Return all tests (configured and unassigned)
     return Array.from(allTests).map(name => ({
       name,
+      externalName: testExternalNames[name] || name, // Default to internal name
       configured: !!testConfigs[name],
       segmentCount: testConfigs[name]?.length || 0,
       segments: testConfigs[name] || [],
@@ -170,7 +176,7 @@ async function getAllTests() {
 async function getTestConfig(testName) {
   try {
     const sheets = await getSheets();
-    const range = process.env.TESTS_SHEET_RANGE || 'Tests!A:F';
+    const range = 'Tests!A:G'; // Extended to include External_Name
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
@@ -181,13 +187,14 @@ async function getTestConfig(testName) {
     const segments = [];
     let instructionsAudioUrl = '';
     let warmupAudioUrl = '';
+    let externalName = testName; // Default to internal name
 
     // ALSO load universal instructions and warmup from _UNIVERSAL_INSTRUCTIONS
     let universalInstructionsUrl = '';
     let universalWarmupSegments = [];
 
     for (let i = 1; i < rows.length; i++) {
-      const [name, segmentNum, audioUrl, status, instructions, warmup] = rows[i];
+      const [name, segmentNum, audioUrl, status, instructions, warmup, extName] = rows[i];
 
       // Load universal instructions and warmup
       if (name === '_UNIVERSAL_INSTRUCTIONS' && status === 'active') {
@@ -222,6 +229,10 @@ async function getTestConfig(testName) {
         if (!warmupAudioUrl && warmup) {
           warmupAudioUrl = warmup;
         }
+        // Capture external name (only once)
+        if (extName && externalName === testName) {
+          externalName = extName;
+        }
       }
     }
 
@@ -253,6 +264,7 @@ async function getTestConfig(testName) {
 
     return {
       testName,
+      externalName,
       segments: segments.map(s => s.audioUrl),
       instructionsAudioUrl: finalInstructionsUrl || '',
       warmupAudioUrl: finalWarmupUrl || '',
@@ -265,10 +277,10 @@ async function getTestConfig(testName) {
   }
 }
 
-async function saveTestSegments(testName, segments, instructionsAudioUrl = '', warmupAudioUrl = '', warmupSegments = []) {
+async function saveTestSegments(testName, segments, instructionsAudioUrl = '', warmupAudioUrl = '', warmupSegments = [], externalName = '') {
   try {
     const sheets = await getSheets();
-    const range = process.env.TESTS_SHEET_RANGE || 'Tests!A:F';
+    const range = 'Tests!A:G'; // Extended to include External_Name column
 
     // First, get existing data to preserve other tests
     let existingRows = [];
@@ -285,7 +297,17 @@ async function saveTestSegments(testName, segments, instructionsAudioUrl = '', w
 
     // Ensure headers exist (if sheet is empty or doesn't have headers)
     if (existingRows.length === 0) {
-      existingRows = [['Test_Name', 'Segment_Number', 'Audio_URL', 'Status', 'Instructions_Audio_URL', 'Warmup_Audio_URL']];
+      existingRows = [['Test_Name', 'Segment_Number', 'Audio_URL', 'Status', 'Instructions_Audio_URL', 'Warmup_Audio_URL', 'External_Name']];
+    } else if (!existingRows[0].includes('External_Name')) {
+      // Add External_Name header if missing (migration)
+      existingRows[0][6] = 'External_Name';
+    }
+
+    // Get existing external name if not provided (preserve it on updates)
+    let finalExternalName = externalName;
+    if (!finalExternalName) {
+      const existingTest = existingRows.find((row, index) => index > 0 && row[0] === testName);
+      finalExternalName = existingTest?.[6] || testName; // Default to test name if no external name
     }
 
     // Remove old entries for this test
@@ -310,6 +332,7 @@ async function saveTestSegments(testName, segments, instructionsAudioUrl = '', w
           'active',
           instructionsAudioUrl || '',
           warmupValue,
+          finalExternalName,
         ]);
       });
     } else if (warmupSegments.length > 0 || instructionsAudioUrl) {
@@ -322,6 +345,7 @@ async function saveTestSegments(testName, segments, instructionsAudioUrl = '', w
         'active',
         '',
         warmupValue,
+        finalExternalName,
       ]);
     }
 
@@ -342,10 +366,106 @@ async function saveTestSegments(testName, segments, instructionsAudioUrl = '', w
   }
 }
 
+// Update just the external name for a test
+async function updateTestExternalName(testName, externalName) {
+  try {
+    const sheets = await getSheets();
+    const range = 'Tests!A:G';
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: range,
+    });
+
+    const rows = response.data.values || [];
+    if (rows.length === 0) {
+      throw new Error('Tests sheet is empty');
+    }
+
+    // Ensure External_Name header exists
+    if (!rows[0].includes('External_Name')) {
+      rows[0][6] = 'External_Name';
+    }
+
+    // Update external name for all rows of this test
+    let found = false;
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === testName) {
+        rows[i][6] = externalName;
+        found = true;
+      }
+    }
+
+    if (!found) {
+      throw new Error(`Test "${testName}" not found`);
+    }
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: range,
+      valueInputOption: 'RAW',
+      resource: { values: rows },
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Error updating test external name:', error);
+    throw error;
+  }
+}
+
+// Delete a test (removes all segments)
+async function deleteTest(testName) {
+  try {
+    const sheets = await getSheets();
+    const range = 'Tests!A:G';
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: range,
+    });
+
+    const rows = response.data.values || [];
+    if (rows.length === 0) {
+      throw new Error('Tests sheet is empty');
+    }
+
+    // Filter out all rows for this test
+    const filteredRows = rows.filter((row, index) => {
+      if (index === 0) return true; // Keep header
+      return row[0] !== testName;
+    });
+
+    if (filteredRows.length === rows.length) {
+      throw new Error(`Test "${testName}" not found`);
+    }
+
+    // Clear the sheet and write filtered data
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: range,
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: range,
+      valueInputOption: 'RAW',
+      resource: { values: filteredRows },
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Error deleting test:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   getStudentRecord,
   validateAdmin,
   getAllTests,
   getTestConfig,
   saveTestSegments,
+  updateTestExternalName,
+  deleteTest,
 };
