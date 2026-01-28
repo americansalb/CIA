@@ -70,8 +70,27 @@ function renderTests(tests) {
     const statusClass = test.configured ? 'test-configured' : 'test-not-configured';
     const statusText = test.configured ? '✓ Configured' : 'Not Configured';
     const info = test.configured ? `${test.segmentCount} segments configured` : 'Click to add audio segments';
+    const hasExternalName = test.externalName && test.externalName !== test.name;
+    const displayName = hasExternalName ? `${test.externalName} <span style="color: #888; font-size: 12px;">(${test.name})</span>` : test.name;
 
-    return `<div class="test-card" onclick="editTest('${test.name}')"><div class="test-card-header"><div class="test-name">${test.name}</div><div class="test-status ${statusClass}">${statusText}</div></div><div class="test-info">${info}</div></div>`;
+    return `
+      <div class="test-card" style="position: relative;">
+        <div onclick="editTest('${test.name}')" style="cursor: pointer;">
+          <div class="test-card-header">
+            <div class="test-name">${displayName}</div>
+            <div class="test-status ${statusClass}">${statusText}</div>
+          </div>
+          <div class="test-info">${info}</div>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee;">
+          <button onclick="event.stopPropagation(); editTestName('${test.name}', '${(test.externalName || test.name).replace(/'/g, "\\'")}')" style="flex: 1; padding: 6px 10px; font-size: 12px; background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+            ✏️ Edit Display Name
+          </button>
+          <button onclick="event.stopPropagation(); deleteTestConfirm('${test.name}')" style="padding: 6px 10px; font-size: 12px; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 4px; cursor: pointer; color: #c62828;">
+            🗑️ Delete
+          </button>
+        </div>
+      </div>`;
   }).join('');
 
   container.innerHTML = header + testCards;
@@ -880,5 +899,81 @@ async function processAndUpload() {
   } finally {
     document.getElementById('processingStatus').style.display = 'none';
     document.getElementById('processBtn').disabled = false;
+  }
+}
+
+// Edit test external name (student-facing display name)
+function editTestName(testName, currentExternalName) {
+  const newName = prompt(
+    `Edit the student-facing display name for "${testName}":\n\n` +
+    `• Internal name (unchangeable): ${testName}\n` +
+    `• This is what students will see when selecting their test.`,
+    currentExternalName
+  );
+
+  if (newName === null) return; // Cancelled
+
+  if (!newName.trim()) {
+    alert('Display name cannot be empty');
+    return;
+  }
+
+  updateTestExternalName(testName, newName.trim());
+}
+
+async function updateTestExternalName(testName, externalName) {
+  try {
+    const response = await fetch('/api/update-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ testName, externalName }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      alert('Display name updated successfully!');
+      loadTests();
+    } else {
+      alert('Failed to update: ' + result.message);
+    }
+  } catch (error) {
+    console.error('Error updating test:', error);
+    alert('Error updating test');
+  }
+}
+
+// Delete test with confirmation
+function deleteTestConfirm(testName) {
+  const confirmed = confirm(
+    `⚠️ Delete test "${testName}"?\n\n` +
+    `This will remove the test configuration (audio segments) but will NOT remove student assignments.\n\n` +
+    `Students assigned to this test will see "Test not configured" until you reconfigure it.`
+  );
+
+  if (confirmed) {
+    deleteTest(testName);
+  }
+}
+
+async function deleteTest(testName) {
+  try {
+    const response = await fetch('/api/delete-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ testName }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      alert('Test deleted successfully!');
+      loadTests();
+    } else {
+      alert('Failed to delete: ' + result.message);
+    }
+  } catch (error) {
+    console.error('Error deleting test:', error);
+    alert('Error deleting test');
   }
 }
