@@ -6,19 +6,24 @@ async function findOrCreateFolder(parentFolderId, folderName) {
   try {
     const drive = await getDrive();
 
-    // Search for existing folder
     const query = `name='${folderName}' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
 
+    // Search for existing folder
     const searchResponse = await drive.files.list({
       q: query,
-      fields: 'files(id, name)',
+      fields: 'files(id, name, createdTime)',
       spaces: 'drive',
       supportsAllDrives: true,
       includeItemsFromAllDrives: true,
     });
 
     if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-      return searchResponse.data.files[0].id;
+      // If duplicates exist (from past races), always pick the oldest so all
+      // callers converge to the same folder going forward
+      const sorted = searchResponse.data.files.sort((a, b) =>
+        new Date(a.createdTime) - new Date(b.createdTime)
+      );
+      return sorted[0].id;
     }
 
     // Create new folder
@@ -33,6 +38,24 @@ async function findOrCreateFolder(parentFolderId, folderName) {
       fields: 'id',
       supportsAllDrives: true,
     });
+
+    // Re-check for race condition: another request may have created the same
+    // folder between our search and create. Converge to the oldest folder.
+    const recheck = await drive.files.list({
+      q: query,
+      fields: 'files(id, name, createdTime)',
+      spaces: 'drive',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+
+    if (recheck.data.files && recheck.data.files.length > 1) {
+      const sorted = recheck.data.files.sort((a, b) =>
+        new Date(a.createdTime) - new Date(b.createdTime)
+      );
+      console.warn(`[Drive] Race detected: ${recheck.data.files.length} folders named "${folderName}", converging to oldest`);
+      return sorted[0].id;
+    }
 
     return folder.data.id;
   } catch (error) {
