@@ -61,38 +61,73 @@ module.exports = async (req, res) => {
 
     console.log(`[Recordings] Found ${studentFolders.length} student folders`);
 
-    // Step 2: Get all session folders IN PARALLEL
-    const sessionFolderPromises = studentFolders.map(async (studentFolder) => {
-      const sessions = await listAllFiles(
-        drive,
-        `'${studentFolder.id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-        'id, name, createdTime'
-      );
-      return sessions.map(s => ({ ...s, studentFolder }));
+    // Group student folders by name — race conditions in findOrCreateFolder can
+    // create duplicate folders with the same name but different IDs, scattering
+    // files across them. We merge duplicates so no recordings are lost.
+    const studentGroups = new Map();
+    for (const f of studentFolders) {
+      if (!studentGroups.has(f.name)) studentGroups.set(f.name, []);
+      studentGroups.get(f.name).push(f);
+    }
+
+    console.log(`[Recordings] ${studentGroups.size} unique students (${studentFolders.length} folders)`);
+
+    // Step 2: For each student, get session folders from ALL duplicate student
+    // folders, then group sessions by name to merge duplicates at that level too.
+    const sessionGroupPromises = [...studentGroups.entries()].map(async ([studentName, folders]) => {
+      const allSessions = [];
+      for (const studentFolder of folders) {
+        const sessions = await listAllFiles(
+          drive,
+          `'${studentFolder.id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+          'id, name, createdTime'
+        );
+        allSessions.push(...sessions);
+      }
+
+      // Group session folders by name (session ID) to merge duplicates
+      const sessionMap = new Map();
+      for (const s of allSessions) {
+        if (!sessionMap.has(s.name)) sessionMap.set(s.name, []);
+        sessionMap.get(s.name).push(s);
+      }
+
+      return [...sessionMap.entries()].map(([sessionName, sessionFolders]) => ({
+        sessionName,
+        sessionFolders,           // All folder instances for this session (may be >1)
+        studentFolderName: studentName,
+      }));
     });
 
-    const sessionFoldersNested = await Promise.all(sessionFolderPromises);
-    const allSessionFolders = sessionFoldersNested.flat();
+    const sessionGroupsNested = await Promise.all(sessionGroupPromises);
+    const allSessionGroups = sessionGroupsNested.flat();
 
-    console.log(`[Recordings] Found ${allSessionFolders.length} session folders`);
+    console.log(`[Recordings] Found ${allSessionGroups.length} unique sessions`);
 
     // Step 3: Get files from all sessions IN PARALLEL (batched to avoid rate limits)
     const BATCH_SIZE = 20;
     const recordings = [];
 
-    for (let i = 0; i < allSessionFolders.length; i += BATCH_SIZE) {
-      const batch = allSessionFolders.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < allSessionGroups.length; i += BATCH_SIZE) {
+      const batch = allSessionGroups.slice(i, i + BATCH_SIZE);
 
-      const batchResults = await Promise.all(batch.map(async (sessionInfo) => {
-        const sessionFolder = sessionInfo;
-        const studentFolder = sessionInfo.studentFolder;
-
+      const batchResults = await Promise.all(batch.map(async (sessionGroup) => {
         try {
-          const files = await listAllFiles(
-            drive,
-            `'${sessionFolder.id}' in parents and trashed=false`,
-            'id, name, createdTime, webViewLink, mimeType'
-          );
+          // Fetch files from ALL duplicate session folders and merge them
+          const files = [];
+          for (const folder of sessionGroup.sessionFolders) {
+            const folderFiles = await listAllFiles(
+              drive,
+              `'${folder.id}' in parents and trashed=false`,
+              'id, name, createdTime, webViewLink, mimeType'
+            );
+            files.push(...folderFiles);
+          }
+
+          // Use the first session folder ID for reference (e.g. for combine-chunks)
+          const sessionFolderId = sessionGroup.sessionFolders[0].id;
+          const sessionName = sessionGroup.sessionName;
+          const studentFolderName = sessionGroup.studentFolderName;
 
           const metadataFile = files.find(f => f.name.endsWith('_metadata.json'));
           // Match video files by MIME type OR filename extension to catch files
@@ -119,7 +154,7 @@ module.exports = async (req, res) => {
                 metadata = JSON.parse(metadata);
               }
             } catch (metaErr) {
-              console.error(`[Recordings] Failed to read metadata for session ${sessionFolder.name}:`, metaErr.message);
+              console.error(`[Recordings] Failed to read metadata for session ${sessionName}:`, metaErr.message);
             }
 
             if (metadata && typeof metadata === 'object') {
@@ -135,9 +170,9 @@ module.exports = async (req, res) => {
 
               return {
                 ...metadata,
-                studentFolder: studentFolder.name,
-                sessionFolder: sessionFolder.name,
-                sessionFolderId: sessionFolder.id,
+                studentFolder: studentFolderName,
+                sessionFolder: sessionName,
+                sessionFolderId: sessionFolderId,
                 videos: videoFiles.map(v => ({
                   fileId: v.id,
                   fileName: v.name,
@@ -150,12 +185,11 @@ module.exports = async (req, res) => {
             }
 
             // Metadata download/parse failed — fall through to file-based detection
-            // instead of dropping the recording entirely
-            console.warn(`[Recordings] Metadata unreadable for session ${sessionFolder.name}, using file-based detection`);
+            console.warn(`[Recordings] Metadata unreadable for session ${sessionName}, using file-based detection`);
           }
 
           // No valid metadata — build recording entry from available files
-          const { email, studentId } = parseStudentFolder(studentFolder.name);
+          const { email, studentId } = parseStudentFolder(studentFolderName);
           const combinedVideos = files.filter(f => f.name.includes('COMBINED_'));
           const hasCombinedMain = combinedVideos.some(f => f.name.includes('COMBINED_main'));
           const hasCombinedProctor = combinedVideos.some(f => f.name.includes('COMBINED_proctor'));
@@ -191,18 +225,18 @@ module.exports = async (req, res) => {
           const hasFinalVideos = videoFiles.length > 0;
 
           return {
-            sessionId: sessionFolder.name,
+            sessionId: sessionName,
             email: email,
             studentId: studentId,
             permittedTest: permittedTest,
             duration: 'incomplete',
             interventionCount: 0,
             interventions: [],
-            uploadedAt: earliestFile ? earliestFile.createdTime : sessionFolder.createdTime,
+            uploadedAt: earliestFile ? earliestFile.createdTime : sessionGroup.sessionFolders[0].createdTime,
             status: hasFinalVideos ? 'pending_review' : 'incomplete',
-            studentFolder: studentFolder.name,
-            sessionFolder: sessionFolder.name,
-            sessionFolderId: sessionFolder.id,
+            studentFolder: studentFolderName,
+            sessionFolder: sessionName,
+            sessionFolderId: sessionFolderId,
             chunkCount: Object.keys(chunkCount).length > 0 ? chunkCount : null,
             videos: [
               // Include FINAL videos
@@ -244,7 +278,7 @@ module.exports = async (req, res) => {
             ],
           };
         } catch (err) {
-          console.error(`Error processing session ${sessionFolder.name}:`, err.message);
+          console.error(`Error processing session ${sessionGroup.sessionName}:`, err.message);
           return null;
         }
       }));
