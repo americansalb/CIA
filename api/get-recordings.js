@@ -22,6 +22,31 @@ async function listAllFiles(drive, query, fields) {
   return allFiles;
 }
 
+// Helper to parse student info from folder name (format: email_studentId)
+function parseStudentFolder(folderName) {
+  const folderParts = folderName.split('_');
+  return {
+    email: folderParts.slice(0, -1).join('_'),
+    studentId: folderParts[folderParts.length - 1],
+  };
+}
+
+// Helper to extract test name from a FINAL video filename
+// Format: email_studentId_testName_deviceType_FINAL_timestamp.ext
+function extractTestName(fileName, email, studentId) {
+  const beforeFinal = fileName.split('_FINAL_')[0];
+  const prefix = `${email}_${studentId}_`;
+  if (beforeFinal.startsWith(prefix)) {
+    const remainder = beforeFinal.slice(prefix.length);
+    const parts = remainder.split('_');
+    if (parts.length >= 2) {
+      // Last part is deviceType (main/proctor), everything before is test name
+      return parts.slice(0, -1).join('_');
+    }
+  }
+  return 'Unknown';
+}
+
 module.exports = async (req, res) => {
   try {
     const drive = await getDrive();
@@ -70,106 +95,154 @@ module.exports = async (req, res) => {
           );
 
           const metadataFile = files.find(f => f.name.endsWith('_metadata.json'));
-          const videoFiles = files.filter(f => f.name.includes('_FINAL_') && (f.mimeType === 'video/webm' || f.mimeType === 'video/mp4'));
+          // Match video files by MIME type OR filename extension to catch files
+          // uploaded with non-standard MIME types (e.g. application/octet-stream)
+          const videoFiles = files.filter(f => f.name.includes('_FINAL_') && (
+            f.mimeType === 'video/webm' || f.mimeType === 'video/mp4' ||
+            f.name.endsWith('.webm') || f.name.endsWith('.mp4')
+          ));
           const chunkFiles = files.filter(f => f.name.includes('_chunk_'));
 
           if (metadataFile) {
-            // Complete recording with metadata
-            const metadataResponse = await drive.files.get({
-              fileId: metadataFile.id,
-              alt: 'media',
-              supportsAllDrives: true,
-            });
+            // Try to download and parse metadata
+            let metadata = null;
+            try {
+              const metadataResponse = await drive.files.get({
+                fileId: metadataFile.id,
+                alt: 'media',
+                supportsAllDrives: true,
+              });
 
-            const metadata = metadataResponse.data;
+              metadata = metadataResponse.data;
+              // Handle case where response is a string instead of parsed JSON
+              if (typeof metadata === 'string') {
+                metadata = JSON.parse(metadata);
+              }
+            } catch (metaErr) {
+              console.error(`[Recordings] Failed to read metadata for session ${sessionFolder.name}:`, metaErr.message);
+            }
 
-            // Check which videos have been converted
-            const convertedFiles = videoFiles.filter(f => f.name.includes('_CONVERTED_'));
-            const unconvertedWebms = videoFiles.filter(f =>
-              f.name.endsWith('.webm') &&
-              !f.name.includes('_CONVERTED_') &&
-              !convertedFiles.some(cf =>
-                cf.name.replace('_CONVERTED_', '_').replace('.mp4', '.webm') === f.name
-              )
-            );
+            if (metadata && typeof metadata === 'object') {
+              // Complete recording with valid metadata
+              const convertedFiles = videoFiles.filter(f => f.name.includes('_CONVERTED_'));
+              const unconvertedWebms = videoFiles.filter(f =>
+                f.name.endsWith('.webm') &&
+                !f.name.includes('_CONVERTED_') &&
+                !convertedFiles.some(cf =>
+                  cf.name.replace('_CONVERTED_', '_').replace('.mp4', '.webm') === f.name
+                )
+              );
 
-            return {
-              ...metadata,
-              studentFolder: studentFolder.name,
-              sessionFolder: sessionFolder.name,
-              sessionFolderId: sessionFolder.id,
-              videos: videoFiles.map(v => ({
+              return {
+                ...metadata,
+                studentFolder: studentFolder.name,
+                sessionFolder: sessionFolder.name,
+                sessionFolderId: sessionFolder.id,
+                videos: videoFiles.map(v => ({
+                  fileId: v.id,
+                  fileName: v.name,
+                  webViewLink: v.webViewLink,
+                  mimeType: v.mimeType,
+                  deviceType: v.name.includes('_main_') ? 'main' : 'proctor',
+                  needsConversion: unconvertedWebms.some(u => u.id === v.id),
+                })),
+              };
+            }
+
+            // Metadata download/parse failed — fall through to file-based detection
+            // instead of dropping the recording entirely
+            console.warn(`[Recordings] Metadata unreadable for session ${sessionFolder.name}, using file-based detection`);
+          }
+
+          // No valid metadata — build recording entry from available files
+          const { email, studentId } = parseStudentFolder(studentFolder.name);
+          const combinedVideos = files.filter(f => f.name.includes('COMBINED_'));
+          const hasCombinedMain = combinedVideos.some(f => f.name.includes('COMBINED_main'));
+          const hasCombinedProctor = combinedVideos.some(f => f.name.includes('COMBINED_proctor'));
+
+          const mainChunks = chunkFiles.filter(f => f.name.includes('main_chunk_'));
+          const proctorChunks = chunkFiles.filter(f => f.name.includes('proctor_chunk_'));
+
+          // Skip truly empty session folders
+          if (chunkFiles.length === 0 && videoFiles.length === 0 && combinedVideos.length === 0) {
+            return null;
+          }
+
+          const earliestFile = [...chunkFiles, ...videoFiles].sort((a, b) =>
+            new Date(a.createdTime) - new Date(b.createdTime)
+          )[0];
+
+          // Try to extract test name from FINAL video filenames
+          let permittedTest = 'Unknown';
+          if (videoFiles.length > 0) {
+            permittedTest = extractTestName(videoFiles[0].name, email, studentId);
+          }
+
+          const chunkCount = {};
+          if (mainChunks.length > 0 && !hasCombinedMain) {
+            chunkCount.main = mainChunks.length;
+          }
+          if (proctorChunks.length > 0 && !hasCombinedProctor) {
+            chunkCount.proctor = proctorChunks.length;
+          }
+
+          const mainFinal = videoFiles.filter(f => f.name.includes('_main_'));
+          const proctorFinal = videoFiles.filter(f => f.name.includes('_proctor_'));
+          const hasFinalVideos = videoFiles.length > 0;
+
+          return {
+            sessionId: sessionFolder.name,
+            email: email,
+            studentId: studentId,
+            permittedTest: permittedTest,
+            duration: 'incomplete',
+            interventionCount: 0,
+            interventions: [],
+            uploadedAt: earliestFile ? earliestFile.createdTime : sessionFolder.createdTime,
+            status: hasFinalVideos ? 'pending_review' : 'incomplete',
+            studentFolder: studentFolder.name,
+            sessionFolder: sessionFolder.name,
+            sessionFolderId: sessionFolder.id,
+            chunkCount: Object.keys(chunkCount).length > 0 ? chunkCount : null,
+            videos: [
+              // Include FINAL videos
+              ...mainFinal.map(v => ({
                 fileId: v.id,
                 fileName: v.name,
                 webViewLink: v.webViewLink,
                 mimeType: v.mimeType,
-                deviceType: v.name.includes('_main_') ? 'main' : 'proctor',
-                needsConversion: unconvertedWebms.some(u => u.id === v.id),
+                deviceType: 'main',
               })),
-            };
-          } else if (chunkFiles.length > 0) {
-            // Incomplete recording
-            const folderParts = studentFolder.name.split('_');
-            const email = folderParts.slice(0, -1).join('_');
-            const studentId = folderParts[folderParts.length - 1];
-
-            const mainChunks = chunkFiles.filter(f => f.name.includes('main_chunk_'));
-            const proctorChunks = chunkFiles.filter(f => f.name.includes('proctor_chunk_'));
-            const combinedVideos = files.filter(f => f.name.includes('COMBINED_'));
-            const hasCombinedMain = combinedVideos.some(f => f.name.includes('COMBINED_main'));
-            const hasCombinedProctor = combinedVideos.some(f => f.name.includes('COMBINED_proctor'));
-
-            const earliestChunk = chunkFiles.sort((a, b) =>
-              new Date(a.createdTime) - new Date(b.createdTime)
-            )[0];
-
-            const chunkCount = {};
-            if (mainChunks.length > 0 && !hasCombinedMain) {
-              chunkCount.main = mainChunks.length;
-            }
-            if (proctorChunks.length > 0 && !hasCombinedProctor) {
-              chunkCount.proctor = proctorChunks.length;
-            }
-
-            return {
-              sessionId: sessionFolder.name,
-              email: email,
-              studentId: studentId,
-              permittedTest: 'Unknown',
-              duration: 'incomplete',
-              interventionCount: 0,
-              interventions: [],
-              uploadedAt: earliestChunk ? earliestChunk.createdTime : sessionFolder.createdTime,
-              status: 'incomplete',
-              studentFolder: studentFolder.name,
-              sessionFolder: sessionFolder.name,
-              sessionFolderId: sessionFolder.id,
-              chunkCount: Object.keys(chunkCount).length > 0 ? chunkCount : null,
-              videos: [
-                ...combinedVideos.map(v => ({
-                  fileId: v.id,
-                  fileName: v.name,
-                  webViewLink: v.webViewLink,
-                  deviceType: v.name.includes('_main') ? 'main' : 'proctor',
-                  isCombined: true,
-                })),
-                ...(mainChunks.length > 0 && !hasCombinedMain ? [{
-                  fileId: 'chunks',
-                  fileName: `${mainChunks.length} chunks`,
-                  webViewLink: null,
-                  deviceType: 'main',
-                }] : []),
-                ...(proctorChunks.length > 0 && !hasCombinedProctor ? [{
-                  fileId: 'chunks',
-                  fileName: `${proctorChunks.length} chunks`,
-                  webViewLink: null,
-                  deviceType: 'proctor',
-                }] : []),
-              ],
-            };
-          }
-
-          return null;
+              ...proctorFinal.map(v => ({
+                fileId: v.id,
+                fileName: v.name,
+                webViewLink: v.webViewLink,
+                mimeType: v.mimeType,
+                deviceType: 'proctor',
+              })),
+              // Include combined videos
+              ...combinedVideos.map(v => ({
+                fileId: v.id,
+                fileName: v.name,
+                webViewLink: v.webViewLink,
+                deviceType: v.name.includes('_main') ? 'main' : 'proctor',
+                isCombined: true,
+              })),
+              // Include chunk references only if not already combined or finalized
+              ...(mainChunks.length > 0 && !hasCombinedMain && mainFinal.length === 0 ? [{
+                fileId: 'chunks',
+                fileName: `${mainChunks.length} chunks`,
+                webViewLink: null,
+                deviceType: 'main',
+              }] : []),
+              ...(proctorChunks.length > 0 && !hasCombinedProctor && proctorFinal.length === 0 ? [{
+                fileId: 'chunks',
+                fileName: `${proctorChunks.length} chunks`,
+                webViewLink: null,
+                deviceType: 'proctor',
+              }] : []),
+            ],
+          };
         } catch (err) {
           console.error(`Error processing session ${sessionFolder.name}:`, err.message);
           return null;
