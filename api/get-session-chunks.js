@@ -1,4 +1,8 @@
 const { getDrive } = require('../utils/google-auth');
+const { combineChunkFiles } = require('../utils/video-converter');
+
+// Track in-progress combines to avoid duplicate work
+const combineInProgress = new Map();
 
 // Helper to list ALL files with pagination
 async function listAllFiles(drive, query, fields) {
@@ -44,8 +48,9 @@ module.exports = async (req, res) => {
     );
 
     // Search ALL student folders (including duplicates from race conditions)
-    // and collect all matching session folder IDs
+    // and collect all matching session folder IDs + the student folder name
     const sessionFolderIds = [];
+    let studentFolderName = null;
     for (const studentFolder of studentFolders) {
       const sessionFolders = await listAllFiles(
         drive,
@@ -54,6 +59,7 @@ module.exports = async (req, res) => {
       );
       for (const sf of sessionFolders) {
         sessionFolderIds.push(sf.id);
+        if (!studentFolderName) studentFolderName = studentFolder.name;
       }
     }
 
@@ -77,7 +83,7 @@ module.exports = async (req, res) => {
 
     // Check for COMBINED or FINAL videos (these take priority)
     // FINAL filenames are: email_studentid_test_{deviceType}_FINAL_timestamp.ext
-    // COMBINED filenames are: COMBINED_{deviceType}.ext
+    // COMBINED filenames are: COMBINED_{deviceType}.ext or email_studentid_COMBINED_{deviceType}_timestamp.mp4
     const combinedVideos = allFiles.filter(f =>
       f.name.includes(`COMBINED_${deviceType}`) ||
       f.name.includes(`_${deviceType}_FINAL_`)
@@ -102,52 +108,77 @@ module.exports = async (req, res) => {
       });
     }
 
-    // No combined video, get all chunk files for this session and device
-    const chunks = allFiles.filter(f => f.name.includes(`${deviceType}_chunk_`));
-
-    console.log(`[get-session-chunks] Found ${chunks.length} chunks for session ${sessionId}, device ${deviceType}`);
+    // No combined video — gather chunk files for this device type
+    const chunks = allFiles
+      .filter(f => f.name.includes(`${deviceType}_chunk_`))
+      .sort((a, b) => {
+        const numA = parseInt(a.name.match(/_chunk_(\d+)/)?.[1] || '0');
+        const numB = parseInt(b.name.match(/_chunk_(\d+)/)?.[1] || '0');
+        return numA - numB;
+      });
 
     if (chunks.length === 0) {
-      console.log(`[get-session-chunks] No chunks found for session ${sessionId}`);
+      return res.json({ success: true, chunks: [] });
+    }
+
+    // Auto-combine chunks into a single seekable video
+    console.log(`[get-session-chunks] Auto-combining ${chunks.length} ${deviceType} chunks for session ${sessionId}`);
+
+    // Parse student info from folder name
+    const folderParts = (studentFolderName || '').split('_');
+    const email = folderParts.slice(0, -1).join('_') || 'unknown';
+    const studentId = folderParts[folderParts.length - 1] || 'unknown';
+
+    // Prevent duplicate combines for the same session+device
+    const combineKey = `${sessionId}_${deviceType}`;
+    let combinePromise = combineInProgress.get(combineKey);
+
+    if (!combinePromise) {
+      combinePromise = combineChunkFiles(
+        chunks.map(c => ({ id: c.id, name: c.name })),
+        sessionFolderIds[0],
+        deviceType,
+        email,
+        studentId
+      ).finally(() => combineInProgress.delete(combineKey));
+
+      combineInProgress.set(combineKey, combinePromise);
+    }
+
+    // Allow up to 10 minutes for combining
+    req.setTimeout(600000);
+
+    const combineResult = await combinePromise;
+
+    if (combineResult.success) {
+      console.log(`[get-session-chunks] Auto-combine succeeded: ${combineResult.mp4FileName}`);
       return res.json({
         success: true,
-        chunks: [],
+        hasCombinedVideo: true,
+        chunks: [{
+          fileId: combineResult.mp4FileId,
+          fileName: combineResult.mp4FileName,
+          chunkNumber: 0,
+          downloadUrl: `/api/stream-chunk?fileId=${combineResult.mp4FileId}`,
+          mimeType: 'video/mp4',
+          isCombined: true,
+        }],
       });
     }
 
-    // Sort chunks by number
-    chunks.sort((a, b) => {
-      const matchA = a.name.match(/_chunk_(\d+)/);
-      const matchB = b.name.match(/_chunk_(\d+)/);
-      if (!matchA || !matchB) {
-        console.warn(`[get-session-chunks] Invalid chunk filename format: ${a.name} or ${b.name}`);
-        return 0;
-      }
-      const numA = parseInt(matchA[1]);
-      const numB = parseInt(matchB[1]);
-      return numA - numB;
-    });
-
-    // Generate download URLs using our proxy endpoint
-    const chunksWithUrls = chunks.map(chunk => {
-      const match = chunk.name.match(/_chunk_(\d+)/);
-      if (!match) {
-        console.warn(`[get-session-chunks] Skipping invalid chunk filename: ${chunk.name}`);
-        return null;
-      }
-      return {
-        fileId: chunk.id,
-        fileName: chunk.name,
-        chunkNumber: parseInt(match[1]),
-        downloadUrl: `/api/stream-chunk?fileId=${chunk.id}`,
-        mimeType: chunk.mimeType,
-      };
-    }).filter(chunk => chunk !== null);
-
+    // Combine failed — fall back to first chunk only (better than nothing)
+    console.error(`[get-session-chunks] Auto-combine failed: ${combineResult.error}`);
+    const firstChunk = chunks[0];
     res.json({
       success: true,
       hasCombinedVideo: false,
-      chunks: chunksWithUrls,
+      chunks: [{
+        fileId: firstChunk.id,
+        fileName: firstChunk.name,
+        chunkNumber: 0,
+        downloadUrl: `/api/stream-chunk?fileId=${firstChunk.id}`,
+        mimeType: firstChunk.mimeType,
+      }],
     });
   } catch (error) {
     console.error('Get session chunks error:', error);
