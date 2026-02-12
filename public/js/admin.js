@@ -152,9 +152,10 @@ function renderCompactTable(attempts) {
     let actionHtml = '';
     if (hasRealVideo) {
       actionHtml += `<button onclick="openMultiView('${a.sessionId}', '${a.email}')" style="background: #667eea; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Watch</button> `;
+      actionHtml += `<button onclick="compileRecording('${a.sessionId}', this, true)" style="background: #6c757d; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 11px;">Recompile</button> `;
     }
     if (needsCompile) {
-      actionHtml += `<button id="compile-btn-${a.sessionId}" onclick="compileRecording('${a.sessionId}', this)" style="background: #ff9800; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Compile (${totalChunks} chunks)</button>`;
+      actionHtml += `<button id="compile-btn-${a.sessionId}" onclick="compileRecording('${a.sessionId}', this, false)" style="background: #ff9800; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Compile (${totalChunks} chunks)</button>`;
     }
     if (!hasRealVideo && !needsCompile && !isPractice) {
       actionHtml = '<span style="color: #999; font-size: 11px;">No video</span>';
@@ -933,18 +934,17 @@ window.switchTab = switchTab;
 // COMPILE RECORDING
 // ====================
 
-async function compileRecording(sessionId, button) {
-  console.log(`[Compile] Starting compile for session: ${sessionId}`);
-  const origText = button.textContent;
+async function compileRecording(sessionId, button, force) {
+  console.log(`[Compile] Starting compile for session: ${sessionId}, force: ${!!force}`);
   button.disabled = true;
-  button.textContent = 'Starting...';
+  button.textContent = force ? 'Recompiling...' : 'Starting...';
   button.style.background = '#6c757d';
 
   try {
     const response = await fetch('/api/compile-recording', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId }),
+      body: JSON.stringify({ sessionId, force: !!force }),
     });
     const result = await response.json();
 
@@ -1031,10 +1031,6 @@ async function openMultiView(sessionId, email) {
   multiViewData.sessionId = sessionId;
   multiViewData.email = email;
   multiViewData.currentSpotlight = 'main';
-  multiViewData.chunkLists = { main: [], proctor: [], screen: [] };
-  multiViewData.chunkIndex = { main: 0, proctor: 0, screen: 0 };
-  multiViewData.chunkTimeOffset = { main: 0, proctor: 0, screen: 0 };
-  multiViewData._preload = {};
 
   const modal = document.getElementById('multiViewModal');
   const title = document.getElementById('multiViewTitle');
