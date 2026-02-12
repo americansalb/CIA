@@ -330,13 +330,15 @@ async function combineChunkFiles(chunkList, outputFolderId, deviceType, studentE
         .outputOptions([
           '-c:v libx264',
           '-preset ultrafast',
-          '-crf 28',
+          '-crf 30',
+          '-vf', 'scale=-2:480',        // 480p — keeps memory low on 512MB servers
           '-c:a aac',
-          '-b:a 128k',
-          '-movflags +faststart',
+          '-b:a 96k',
+          '-ac 1',                        // mono audio — saves memory
           '-vsync cfr',
-          '-r 30',
+          '-r 24',                        // 24fps — less frames to encode
           '-threads 1',
+          '-x264-params', 'rc-lookahead=0:ref=1:bframes=0',  // minimal H264 buffers
           '-avoid_negative_ts make_zero',
         ])
         .output(outputPath)

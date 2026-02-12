@@ -979,7 +979,7 @@ async function compileRecording(sessionId, button, force) {
           if (info.status === 'compiling') parts.push(`${dt}: compiling ${info.chunks} chunks`);
           else if (info.status === 'queued') parts.push(`${dt}: queued (${info.chunks})`);
           else if (info.status === 'done') parts.push(`${dt}: done`);
-          else if (info.status === 'error') parts.push(`${dt}: error`);
+          else if (info.status === 'error') parts.push(`${dt}: ERROR ${info.error || ''}`);
         }
         button.textContent = parts.length > 0 ? parts.join(' | ') : 'Compiling...';
 
