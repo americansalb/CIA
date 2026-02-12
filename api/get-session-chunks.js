@@ -137,8 +137,15 @@ module.exports = async (req, res) => {
     });
 
     // Kick off background combine (non-blocking) so next play is a single video
+    // Guard: skip auto-combine for large chunk counts (memory-safe threshold)
+    const MAX_AUTO_COMBINE_CHUNKS = 20;
     const combineKey = `${sessionId}_${deviceType}`;
-    if (!combineInProgress.has(combineKey)) {
+
+    if (chunks.length > MAX_AUTO_COMBINE_CHUNKS) {
+      log(`Skipping auto-combine: ${chunks.length} chunks exceeds limit of ${MAX_AUTO_COMBINE_CHUNKS} — play chunks seamlessly instead`);
+    } else if (combineInProgress.size > 0) {
+      log(`Skipping auto-combine: another combine already running (${[...combineInProgress].join(', ')})`);
+    } else if (!combineInProgress.has(combineKey)) {
       const folderParts = (studentFolderName || '').split('_');
       const email = folderParts.slice(0, -1).join('_') || 'unknown';
       const studentId = folderParts[folderParts.length - 1] || 'unknown';
