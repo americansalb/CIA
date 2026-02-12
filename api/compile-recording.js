@@ -80,7 +80,7 @@ async function listAllFiles(drive, query, fields) {
 // ---- POST /api/compile-recording ----
 async function startCompile(req, res) {
   try {
-    const { sessionId } = req.body;
+    const { sessionId, force } = req.body;
     if (!sessionId) {
       return res.status(400).json({ success: false, message: 'sessionId required' });
     }
@@ -146,13 +146,25 @@ async function startCompile(req, res) {
     let jobsQueued = 0;
 
     for (const deviceType of ['main', 'proctor', 'screen']) {
-      // Already have combined/FINAL?
-      const hasCombined = allFiles.some(f =>
-        f.name.includes(`COMBINED_${deviceType}`) ||
+      // Check for existing combined videos
+      const existingCombined = allFiles.filter(f =>
+        f.name.includes(`COMBINED_${deviceType}`)
+      );
+      const hasFinal = allFiles.some(f =>
         f.name.includes(`_${deviceType}_FINAL_`)
       );
 
-      if (hasCombined) {
+      if (force && existingCombined.length > 0) {
+        // Delete old COMBINED videos so we can re-compile
+        for (const old of existingCombined) {
+          console.log(`[compile] ${sessionId}/${deviceType}: deleting old COMBINED: ${old.name}`);
+          try {
+            await drive.files.delete({ fileId: old.id, supportsAllDrives: true });
+          } catch (delErr) {
+            console.error(`[compile] Failed to delete ${old.name}:`, delErr.message);
+          }
+        }
+      } else if (existingCombined.length > 0 || hasFinal) {
         status.devices[deviceType] = { status: 'done', chunks: 0, note: 'already compiled' };
         console.log(`[compile] ${sessionId}/${deviceType}: already has combined/FINAL video`);
         continue;
