@@ -929,31 +929,13 @@ let multiViewData = {
   videos: { main: null, proctor: null, screen: null },
   chunkLists: { main: [], proctor: [], screen: [] },
   chunkIndex: { main: 0, proctor: 0, screen: 0 },
+  chunkTimeOffset: { main: 0, proctor: 0, screen: 0 },
+  _preload: {},
   currentSpotlight: 'main'
 };
 
 function mvLog(deviceType, msg) {
   console.log(`[MultiView][${deviceType}] ${msg}`);
-}
-
-function updateMvLabel(deviceType) {
-  const capType = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
-  const box = document.getElementById(`mv${capType}`);
-  const label = box ? box.querySelector('.mv-label') : null;
-  if (!label) return;
-
-  const chunks = multiViewData.chunkLists[deviceType];
-  const idx = multiViewData.chunkIndex[deviceType];
-
-  if (chunks.length === 0) {
-    label.textContent = `${capType} Camera (No recording)`;
-  } else if (chunks.length === 1 && chunks[0].isCombined) {
-    label.textContent = `${capType} Camera (Combined)`;
-  } else if (chunks.length === 1) {
-    label.textContent = `${capType} Camera`;
-  } else {
-    label.textContent = `${capType} Camera — Chunk ${idx + 1}/${chunks.length}`;
-  }
 }
 
 function playMvChunk(deviceType, index) {
@@ -965,37 +947,59 @@ function playMvChunk(deviceType, index) {
   const capType = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
   const video = document.getElementById(`mv${capType}Video`);
   const box = document.getElementById(`mv${capType}`);
+  const label = box ? box.querySelector('.mv-label') : null;
 
-  mvLog(deviceType, `Loading chunk ${index + 1}/${chunks.length}: ${chunk.fileName || chunk.fileId}`);
-  updateMvLabel(deviceType);
+  mvLog(deviceType, `Playing chunk ${index + 1}/${chunks.length}: ${chunk.fileName || chunk.fileId}`);
+
+  // Label: just show camera name (seamless — user doesn't see chunk boundaries)
+  if (label) {
+    if (chunk.isCombined) {
+      label.textContent = `${capType} Camera`;
+    } else if (chunks.length > 1) {
+      label.textContent = `${capType} Camera`;
+    } else {
+      label.textContent = `${capType} Camera`;
+    }
+  }
 
   video.src = chunk.downloadUrl;
   video.load();
   multiViewData.videos[deviceType] = video;
 
+  // Preload next chunk so transition is near-instant
+  if (index + 1 < chunks.length) {
+    const nextUrl = chunks[index + 1].downloadUrl;
+    mvLog(deviceType, `Preloading chunk ${index + 2}/${chunks.length}`);
+    const preloadEl = document.createElement('video');
+    preloadEl.preload = 'auto';
+    preloadEl.muted = true;
+    preloadEl.src = nextUrl;
+    preloadEl.load();
+    multiViewData._preload[deviceType] = preloadEl;
+  }
+
   video.onloadeddata = () => {
-    mvLog(deviceType, `Chunk ${index + 1} loaded — playing`);
+    mvLog(deviceType, `Chunk ${index + 1} ready (duration=${video.duration ? video.duration.toFixed(1) : '?'}s)`);
     box.classList.remove('loading');
     video.play().catch(e => mvLog(deviceType, `Autoplay blocked: ${e.message}`));
   };
 
-  video.onerror = (e) => {
+  video.onerror = () => {
     mvLog(deviceType, `Chunk ${index + 1} ERROR: ${video.error ? video.error.message : 'unknown'}`);
     box.classList.remove('loading');
-    // Try next chunk on error
-    if (index < chunks.length - 1) {
-      mvLog(deviceType, `Skipping to next chunk after error`);
+    if (index + 1 < chunks.length) {
+      multiViewData.chunkTimeOffset[deviceType] += 60; // estimate 60s for failed chunk
       playMvChunk(deviceType, index + 1);
     }
   };
 
   video.onended = () => {
-    if (index < chunks.length - 1) {
-      mvLog(deviceType, `Chunk ${index + 1} ended — advancing to chunk ${index + 2}`);
+    multiViewData.chunkTimeOffset[deviceType] += video.duration || 0;
+    if (index + 1 < chunks.length) {
+      mvLog(deviceType, `Chunk ${index + 1} ended (total ${multiViewData.chunkTimeOffset[deviceType].toFixed(0)}s) — next`);
       playMvChunk(deviceType, index + 1);
     } else {
-      mvLog(deviceType, `All ${chunks.length} chunks finished`);
-      updateMvLabel(deviceType);
+      mvLog(deviceType, `All ${chunks.length} chunks finished (total ${multiViewData.chunkTimeOffset[deviceType].toFixed(0)}s)`);
     }
   };
 }
@@ -1007,6 +1011,8 @@ async function openMultiView(sessionId, email) {
   multiViewData.currentSpotlight = 'main';
   multiViewData.chunkLists = { main: [], proctor: [], screen: [] };
   multiViewData.chunkIndex = { main: 0, proctor: 0, screen: 0 };
+  multiViewData.chunkTimeOffset = { main: 0, proctor: 0, screen: 0 };
+  multiViewData._preload = {};
 
   const modal = document.getElementById('multiViewModal');
   const title = document.getElementById('multiViewTitle');
@@ -1128,25 +1134,33 @@ function closeMultiView() {
     }
   });
 
+  // Clean up preloaded elements
+  Object.values(multiViewData._preload || {}).forEach(el => {
+    if (el) { el.src = ''; }
+  });
+
   multiViewData = {
     sessionId: null,
     email: null,
     videos: { main: null, proctor: null, screen: null },
     chunkLists: { main: [], proctor: [], screen: [] },
     chunkIndex: { main: 0, proctor: 0, screen: 0 },
+    chunkTimeOffset: { main: 0, proctor: 0, screen: 0 },
+    _preload: {},
     currentSpotlight: 'main'
   };
 }
 
-// Update time display
+// Update time display (cumulative across all chunks for seamless experience)
 setInterval(() => {
   const modal = document.getElementById('multiViewModal');
   if (modal.classList.contains('active')) {
-    const video = multiViewData.videos[multiViewData.currentSpotlight];
+    const dt = multiViewData.currentSpotlight;
+    const video = multiViewData.videos[dt];
     if (video && !isNaN(video.currentTime)) {
-      const time = video.currentTime;
-      const mins = Math.floor(time / 60);
-      const secs = Math.floor(time % 60);
+      const totalTime = (multiViewData.chunkTimeOffset[dt] || 0) + video.currentTime;
+      const mins = Math.floor(totalTime / 60);
+      const secs = Math.floor(totalTime % 60);
       document.getElementById('mvTimeDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
     }
   }

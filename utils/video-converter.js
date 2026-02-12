@@ -290,7 +290,6 @@ async function combineChunkFiles(chunkList, outputFolderId, deviceType, studentE
 
   const localFiles = [];
   const concatListPath = path.join(workDir, 'concat_list.txt');
-  const outputPath = path.join(workDir, 'combined_output.mp4');
 
   try {
     // Sort chunks by number
@@ -301,55 +300,101 @@ async function combineChunkFiles(chunkList, outputFolderId, deviceType, studentE
     });
 
     // Download all chunks
+    const dlStart = Date.now();
     for (let i = 0; i < chunkList.length; i++) {
       const chunk = chunkList[i];
       const ext = chunk.name.endsWith('.mp4') ? 'mp4' : 'webm';
       const chunkPath = path.join(workDir, `chunk_${String(i).padStart(4, '0')}.${ext}`);
-      console.log(`[${combineId}] Downloading chunk ${i + 1}/${chunkList.length}: ${chunk.name}`);
+      if (i % 10 === 0 || i === chunkList.length - 1) {
+        console.log(`[${combineId}] Downloading chunk ${i + 1}/${chunkList.length}: ${chunk.name}`);
+      }
       await downloadFile(chunk.id, chunkPath);
       localFiles.push(chunkPath);
     }
+    console.log(`[${combineId}] All ${chunkList.length} chunks downloaded in ${((Date.now() - dlStart) / 1000).toFixed(1)}s`);
+
+    // Detect input format from first chunk
+    const firstExt = localFiles[0].endsWith('.mp4') ? 'mp4' : 'webm';
 
     // Create concat list
     const concatContent = localFiles.map(f => `file '${f}'`).join('\n');
     fs.writeFileSync(concatListPath, concatContent);
 
-    // Concatenate and convert to seekable MP4
-    console.log(`[${combineId}] Concatenating ${chunkList.length} chunks to MP4...`);
-    let lastLogTime = Date.now();
-    await new Promise((resolve, reject) => {
-      ffmpeg()
-        .input(concatListPath)
-        .inputOptions(['-f concat', '-safe 0', '-fflags +genpts'])
-        .outputOptions([
-          '-c:v libx264',
-          '-preset ultrafast',
-          '-crf 28',
-          '-c:a aac',
-          '-b:a 128k',
-          '-movflags +faststart',
-          '-vsync cfr',
-          '-r 30',
-          '-avoid_negative_ts make_zero',
-        ])
-        .output(outputPath)
-        .on('start', () => console.log(`[${combineId}] FFmpeg started`))
-        .on('progress', (progress) => {
-          const now = Date.now();
-          if (now - lastLogTime > 30000) {
-            lastLogTime = now;
-            console.log(`[${combineId}] Processing... timemark: ${progress.timemark || '?'}`);
-          }
-        })
-        .on('end', () => { console.log(`[${combineId}] Concatenation complete`); resolve(); })
-        .on('error', (err) => { console.error(`[${combineId}] FFmpeg error:`, err); reject(err); })
-        .run();
-    });
+    // Try FAST mode first: stream copy (no transcode) — 100x faster
+    const fastOutputPath = path.join(workDir, `combined_output.${firstExt}`);
+    let outputPath = fastOutputPath;
+    let outputExt = firstExt;
+    let usedFastMode = false;
+
+    console.log(`[${combineId}] Trying fast concat (stream copy, ${firstExt})...`);
+    const ffStart = Date.now();
+    try {
+      await new Promise((resolve, reject) => {
+        ffmpeg()
+          .input(concatListPath)
+          .inputOptions(['-f concat', '-safe 0'])
+          .outputOptions(['-c copy', '-avoid_negative_ts make_zero'])
+          .output(fastOutputPath)
+          .on('start', () => console.log(`[${combineId}] FFmpeg fast-mode started`))
+          .on('end', () => { console.log(`[${combineId}] Fast concat done in ${((Date.now() - ffStart) / 1000).toFixed(1)}s`); resolve(); })
+          .on('error', (err) => reject(err))
+          .run();
+      });
+
+      // Verify output is valid (non-zero size)
+      const stat = fs.statSync(fastOutputPath);
+      if (stat.size > 1000) {
+        usedFastMode = true;
+        console.log(`[${combineId}] Fast mode succeeded (${(stat.size / 1024 / 1024).toFixed(1)}MB)`);
+      } else {
+        throw new Error('Output file too small');
+      }
+    } catch (fastErr) {
+      console.log(`[${combineId}] Fast mode failed: ${fastErr.message} — falling back to transcode`);
+    }
+
+    // Fallback: full transcode to MP4
+    if (!usedFastMode) {
+      outputPath = path.join(workDir, 'combined_output.mp4');
+      outputExt = 'mp4';
+      console.log(`[${combineId}] Transcoding ${chunkList.length} chunks to MP4 (this may take a while)...`);
+      let lastLogTime = Date.now();
+      await new Promise((resolve, reject) => {
+        ffmpeg()
+          .input(concatListPath)
+          .inputOptions(['-f concat', '-safe 0', '-fflags +genpts'])
+          .outputOptions([
+            '-c:v libx264',
+            '-preset ultrafast',
+            '-crf 28',
+            '-c:a aac',
+            '-b:a 128k',
+            '-movflags +faststart',
+            '-vsync cfr',
+            '-r 30',
+            '-avoid_negative_ts make_zero',
+          ])
+          .output(outputPath)
+          .on('start', () => console.log(`[${combineId}] FFmpeg transcode started`))
+          .on('progress', (progress) => {
+            const now = Date.now();
+            if (now - lastLogTime > 30000) {
+              lastLogTime = now;
+              console.log(`[${combineId}] Transcoding... timemark: ${progress.timemark || '?'}`);
+            }
+          })
+          .on('end', () => { console.log(`[${combineId}] Transcode done in ${((Date.now() - ffStart) / 1000).toFixed(1)}s`); resolve(); })
+          .on('error', (err) => { console.error(`[${combineId}] FFmpeg transcode error:`, err); reject(err); })
+          .run();
+      });
+    }
 
     // Upload combined video
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const mp4FileName = `${studentEmail}_${studentId}_COMBINED_${deviceType}_${timestamp}.mp4`;
-    const uploadResult = await uploadFile(outputPath, mp4FileName, outputFolderId, 'video/mp4');
+    const mimeType = outputExt === 'mp4' ? 'video/mp4' : 'video/webm';
+    const outFileName = `${studentEmail}_${studentId}_COMBINED_${deviceType}_${timestamp}.${outputExt}`;
+    console.log(`[${combineId}] Uploading combined video (${outFileName})...`);
+    const uploadResult = await uploadFile(outputPath, outFileName, outputFolderId, mimeType);
     console.log(`[${combineId}] Combined video uploaded: ${uploadResult.fileId}`);
 
     // Cleanup
@@ -358,9 +403,10 @@ async function combineChunkFiles(chunkList, outputFolderId, deviceType, studentE
     return {
       success: true,
       mp4FileId: uploadResult.fileId,
-      mp4FileName: mp4FileName,
+      mp4FileName: outFileName,
       webViewLink: uploadResult.webViewLink,
       chunksProcessed: chunkList.length,
+      fastMode: usedFastMode,
     };
   } catch (error) {
     console.error(`[${combineId}] Chunk combination failed:`, error);
