@@ -927,13 +927,86 @@ let multiViewData = {
   sessionId: null,
   email: null,
   videos: { main: null, proctor: null, screen: null },
+  chunkLists: { main: [], proctor: [], screen: [] },
+  chunkIndex: { main: 0, proctor: 0, screen: 0 },
   currentSpotlight: 'main'
 };
 
+function mvLog(deviceType, msg) {
+  console.log(`[MultiView][${deviceType}] ${msg}`);
+}
+
+function updateMvLabel(deviceType) {
+  const capType = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
+  const box = document.getElementById(`mv${capType}`);
+  const label = box ? box.querySelector('.mv-label') : null;
+  if (!label) return;
+
+  const chunks = multiViewData.chunkLists[deviceType];
+  const idx = multiViewData.chunkIndex[deviceType];
+
+  if (chunks.length === 0) {
+    label.textContent = `${capType} Camera (No recording)`;
+  } else if (chunks.length === 1 && chunks[0].isCombined) {
+    label.textContent = `${capType} Camera (Combined)`;
+  } else if (chunks.length === 1) {
+    label.textContent = `${capType} Camera`;
+  } else {
+    label.textContent = `${capType} Camera — Chunk ${idx + 1}/${chunks.length}`;
+  }
+}
+
+function playMvChunk(deviceType, index) {
+  const chunks = multiViewData.chunkLists[deviceType];
+  if (index < 0 || index >= chunks.length) return;
+
+  multiViewData.chunkIndex[deviceType] = index;
+  const chunk = chunks[index];
+  const capType = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
+  const video = document.getElementById(`mv${capType}Video`);
+  const box = document.getElementById(`mv${capType}`);
+
+  mvLog(deviceType, `Loading chunk ${index + 1}/${chunks.length}: ${chunk.fileName || chunk.fileId}`);
+  updateMvLabel(deviceType);
+
+  video.src = chunk.downloadUrl;
+  video.load();
+  multiViewData.videos[deviceType] = video;
+
+  video.onloadeddata = () => {
+    mvLog(deviceType, `Chunk ${index + 1} loaded — playing`);
+    box.classList.remove('loading');
+    video.play().catch(e => mvLog(deviceType, `Autoplay blocked: ${e.message}`));
+  };
+
+  video.onerror = (e) => {
+    mvLog(deviceType, `Chunk ${index + 1} ERROR: ${video.error ? video.error.message : 'unknown'}`);
+    box.classList.remove('loading');
+    // Try next chunk on error
+    if (index < chunks.length - 1) {
+      mvLog(deviceType, `Skipping to next chunk after error`);
+      playMvChunk(deviceType, index + 1);
+    }
+  };
+
+  video.onended = () => {
+    if (index < chunks.length - 1) {
+      mvLog(deviceType, `Chunk ${index + 1} ended — advancing to chunk ${index + 2}`);
+      playMvChunk(deviceType, index + 1);
+    } else {
+      mvLog(deviceType, `All ${chunks.length} chunks finished`);
+      updateMvLabel(deviceType);
+    }
+  };
+}
+
 async function openMultiView(sessionId, email) {
+  console.log(`[MultiView] Opening for session=${sessionId} email=${email}`);
   multiViewData.sessionId = sessionId;
   multiViewData.email = email;
   multiViewData.currentSpotlight = 'main';
+  multiViewData.chunkLists = { main: [], proctor: [], screen: [] };
+  multiViewData.chunkIndex = { main: 0, proctor: 0, screen: 0 };
 
   const modal = document.getElementById('multiViewModal');
   const title = document.getElementById('multiViewTitle');
@@ -945,57 +1018,48 @@ async function openMultiView(sessionId, email) {
   // Reset grid layout
   grid.className = '';
 
-  // Show loading state with combining message
+  // Show loading state
   ['Main', 'Proctor', 'Screen'].forEach(type => {
     const box = document.getElementById(`mv${type}`);
     box.classList.add('loading');
     box.classList.remove('spotlight');
     const label = box.querySelector('.mv-label');
-    if (label) label.textContent = `${type} Camera`;
+    if (label) label.textContent = `${type} Camera - Loading...`;
   });
 
-  // Fetch videos for each device type (server auto-combines chunks into single video)
+  // Fetch all device types in parallel
   const deviceTypes = ['main', 'proctor', 'screen'];
+  const fetches = deviceTypes.map(async (deviceType) => {
+    const capType = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
+    const box = document.getElementById(`mv${capType}`);
+    const video = document.getElementById(`mv${capType}Video`);
+    const label = box.querySelector('.mv-label');
 
-  for (const deviceType of deviceTypes) {
     try {
-      const capType = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
-      const box = document.getElementById(`mv${capType}`);
-      const video = document.getElementById(`mv${capType}Video`);
-      const label = box.querySelector('.mv-label');
-      if (label) label.textContent = `${capType} Camera - Preparing video...`;
-
+      mvLog(deviceType, `Fetching chunks for session=${sessionId}`);
       const response = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
       const result = await response.json();
 
-      if (label) label.textContent = `${capType} Camera`;
+      mvLog(deviceType, `Response: ${result.chunks ? result.chunks.length : 0} chunks, hasCombined=${result.hasCombinedVideo}, combiningBg=${result.combiningInBackground}`);
 
       if (result.success && result.chunks && result.chunks.length > 0) {
-        const videoData = result.chunks[0];
-        video.src = videoData.downloadUrl;
-        video.load();
-        multiViewData.videos[deviceType] = video;
-
-        video.onloadeddata = () => {
-          box.classList.remove('loading');
-        };
-
-        video.onerror = () => {
-          box.classList.remove('loading');
-          console.error(`Failed to load ${deviceType} video`);
-        };
+        multiViewData.chunkLists[deviceType] = result.chunks;
+        playMvChunk(deviceType, 0);
       } else {
-        // No video for this device type
+        mvLog(deviceType, 'No chunks found');
         box.classList.remove('loading');
         video.src = '';
-        if (label) label.textContent += ' (No recording)';
+        if (label) label.textContent = `${capType} Camera (No recording)`;
       }
     } catch (error) {
-      console.error(`Error loading ${deviceType} video:`, error);
-      const boxId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`;
-      document.getElementById(boxId).classList.remove('loading');
+      mvLog(deviceType, `Fetch ERROR: ${error.message}`);
+      box.classList.remove('loading');
+      if (label) label.textContent = `${capType} Camera (Error)`;
     }
-  }
+  });
+
+  await Promise.all(fetches);
+  console.log('[MultiView] All device types loaded');
 
   // Set initial spotlight
   spotlightVideo('main');
@@ -1053,10 +1117,13 @@ function closeMultiView() {
   const modal = document.getElementById('multiViewModal');
   modal.classList.remove('active');
 
-  // Stop all videos
+  // Stop all videos and clear event handlers
   Object.values(multiViewData.videos).forEach(video => {
     if (video) {
       video.pause();
+      video.onended = null;
+      video.onloadeddata = null;
+      video.onerror = null;
       video.src = '';
     }
   });
@@ -1065,6 +1132,8 @@ function closeMultiView() {
     sessionId: null,
     email: null,
     videos: { main: null, proctor: null, screen: null },
+    chunkLists: { main: [], proctor: [], screen: [] },
+    chunkIndex: { main: 0, proctor: 0, screen: 0 },
     currentSpotlight: 'main'
   };
 }
