@@ -927,8 +927,6 @@ let multiViewData = {
   sessionId: null,
   email: null,
   videos: { main: null, proctor: null, screen: null },
-  chunks: { main: [], proctor: [], screen: [] },
-  chunkIndex: { main: 0, proctor: 0, screen: 0 },
   currentSpotlight: 'main'
 };
 
@@ -947,20 +945,28 @@ async function openMultiView(sessionId, email) {
   // Reset grid layout
   grid.className = '';
 
-  // Show loading state
+  // Show loading state with combining message
   ['Main', 'Proctor', 'Screen'].forEach(type => {
     const box = document.getElementById(`mv${type}`);
     box.classList.add('loading');
     box.classList.remove('spotlight');
+    const label = box.querySelector('.mv-label');
+    if (label) label.textContent = `${type} Camera`;
   });
 
-  // Fetch chunks for each device type
+  // Fetch videos for each device type (server auto-combines chunks into single video)
   const deviceTypes = ['main', 'proctor', 'screen'];
 
   for (const deviceType of deviceTypes) {
     try {
+      const box = document.getElementById(`mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`);
+      const label = box.querySelector('.mv-label');
+      if (label) label.textContent = `${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)} Camera - Preparing video...`;
+
       const response = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
       const result = await response.json();
+
+      if (label) label.textContent = `${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)} Camera`;
 
       const boxId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`;
       const videoId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}Video`;
@@ -968,29 +974,13 @@ async function openMultiView(sessionId, email) {
       const video = document.getElementById(videoId);
 
       if (result.success && result.chunks && result.chunks.length > 0) {
-        // Store all chunks for this device so we can auto-advance
-        multiViewData.chunks[deviceType] = result.chunks;
-        multiViewData.chunkIndex[deviceType] = 0;
-        multiViewData.videos[deviceType] = video;
-
-        // Load first chunk
-        video.src = result.chunks[0].downloadUrl;
+        const videoData = result.chunks[0];
+        video.src = videoData.downloadUrl;
         video.load();
+        multiViewData.videos[deviceType] = video;
 
         video.onloadeddata = () => {
           box.classList.remove('loading');
-        };
-
-        // Auto-advance to next chunk when current one ends
-        video.onended = () => {
-          const chunks = multiViewData.chunks[deviceType];
-          const nextIdx = multiViewData.chunkIndex[deviceType] + 1;
-          if (nextIdx < chunks.length) {
-            multiViewData.chunkIndex[deviceType] = nextIdx;
-            video.src = chunks[nextIdx].downloadUrl;
-            video.load();
-            video.play().catch(err => console.log('Auto-advance play failed:', err));
-          }
         };
 
         video.onerror = () => {
@@ -1079,8 +1069,6 @@ function closeMultiView() {
     sessionId: null,
     email: null,
     videos: { main: null, proctor: null, screen: null },
-    chunks: { main: [], proctor: [], screen: [] },
-    chunkIndex: { main: 0, proctor: 0, screen: 0 },
     currentSpotlight: 'main'
   };
 }

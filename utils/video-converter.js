@@ -273,6 +273,99 @@ async function combineChunks(sessionFolderId, deviceType, studentEmail, studentI
 }
 
 /**
+ * Combine pre-identified chunk files into a single video.
+ * Unlike combineChunks which queries a single folder, this accepts an array
+ * of {id, name} objects so it works across duplicate folders.
+ */
+async function combineChunkFiles(chunkList, outputFolderId, deviceType, studentEmail, studentId) {
+  const combineId = `combine_${Date.now()}`;
+  console.log(`[${combineId}] Starting chunk combination for ${deviceType} (${chunkList.length} chunks)`);
+
+  const workDir = path.join(TEMP_DIR, combineId);
+  fs.mkdirSync(workDir, { recursive: true });
+
+  const localFiles = [];
+  const concatListPath = path.join(workDir, 'concat_list.txt');
+  const outputPath = path.join(workDir, 'combined_output.mp4');
+
+  try {
+    // Sort chunks by number
+    chunkList.sort((a, b) => {
+      const numA = parseInt(a.name.match(/chunk_(\d+)/)?.[1] || '0');
+      const numB = parseInt(b.name.match(/chunk_(\d+)/)?.[1] || '0');
+      return numA - numB;
+    });
+
+    // Download all chunks
+    for (let i = 0; i < chunkList.length; i++) {
+      const chunk = chunkList[i];
+      const ext = chunk.name.endsWith('.mp4') ? 'mp4' : 'webm';
+      const chunkPath = path.join(workDir, `chunk_${String(i).padStart(4, '0')}.${ext}`);
+      console.log(`[${combineId}] Downloading chunk ${i + 1}/${chunkList.length}: ${chunk.name}`);
+      await downloadFile(chunk.id, chunkPath);
+      localFiles.push(chunkPath);
+    }
+
+    // Create concat list
+    const concatContent = localFiles.map(f => `file '${f}'`).join('\n');
+    fs.writeFileSync(concatListPath, concatContent);
+
+    // Concatenate and convert to seekable MP4
+    console.log(`[${combineId}] Concatenating ${chunkList.length} chunks to MP4...`);
+    let lastLogTime = Date.now();
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(concatListPath)
+        .inputOptions(['-f concat', '-safe 0', '-fflags +genpts'])
+        .outputOptions([
+          '-c:v libx264',
+          '-preset ultrafast',
+          '-crf 28',
+          '-c:a aac',
+          '-b:a 128k',
+          '-movflags +faststart',
+          '-vsync cfr',
+          '-r 30',
+          '-avoid_negative_ts make_zero',
+        ])
+        .output(outputPath)
+        .on('start', () => console.log(`[${combineId}] FFmpeg started`))
+        .on('progress', (progress) => {
+          const now = Date.now();
+          if (now - lastLogTime > 30000) {
+            lastLogTime = now;
+            console.log(`[${combineId}] Processing... timemark: ${progress.timemark || '?'}`);
+          }
+        })
+        .on('end', () => { console.log(`[${combineId}] Concatenation complete`); resolve(); })
+        .on('error', (err) => { console.error(`[${combineId}] FFmpeg error:`, err); reject(err); })
+        .run();
+    });
+
+    // Upload combined video
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const mp4FileName = `${studentEmail}_${studentId}_COMBINED_${deviceType}_${timestamp}.mp4`;
+    const uploadResult = await uploadFile(outputPath, mp4FileName, outputFolderId, 'video/mp4');
+    console.log(`[${combineId}] Combined video uploaded: ${uploadResult.fileId}`);
+
+    // Cleanup
+    try { fs.rmSync(workDir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+
+    return {
+      success: true,
+      mp4FileId: uploadResult.fileId,
+      mp4FileName: mp4FileName,
+      webViewLink: uploadResult.webViewLink,
+      chunksProcessed: chunkList.length,
+    };
+  } catch (error) {
+    console.error(`[${combineId}] Chunk combination failed:`, error);
+    try { if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Queue chunk combination for background processing
  */
 function queueChunkCombine(sessionFolderId, deviceType, studentEmail, studentId) {
@@ -295,5 +388,6 @@ module.exports = {
   convertToSeekableMp4,
   queueConversion,
   combineChunks,
+  combineChunkFiles,
   queueChunkCombine,
 };
