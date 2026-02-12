@@ -372,6 +372,7 @@ async function combineChunkFiles(chunkList, outputFolderId, deviceType, studentE
             '-movflags +faststart',
             '-vsync cfr',
             '-r 30',
+            '-threads 1',
             '-avoid_negative_ts make_zero',
           ])
           .output(outputPath)
