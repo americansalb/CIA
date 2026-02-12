@@ -2,7 +2,7 @@ const { getDrive } = require('../utils/google-auth');
 const { combineChunkFiles } = require('../utils/video-converter');
 
 // Track in-progress combines to avoid duplicate work
-const combineInProgress = new Map();
+const combineInProgress = new Set();
 
 // Helper to list ALL files with pagination
 async function listAllFiles(drive, query, fields) {
@@ -27,28 +27,30 @@ async function listAllFiles(drive, query, fields) {
 }
 
 module.exports = async (req, res) => {
+  const t0 = Date.now();
+  const log = (msg) => console.log(`[session-chunks ${Date.now() - t0}ms] ${msg}`);
+
   try {
     const { sessionId, deviceType } = req.query;
 
     if (!sessionId || !deviceType) {
-      return res.status(400).json({
-        success: false,
-        message: 'Session ID and device type are required',
-      });
+      return res.status(400).json({ success: false, message: 'Session ID and device type are required' });
     }
+
+    log(`START sessionId=${sessionId} deviceType=${deviceType}`);
 
     const drive = await getDrive();
     const mainFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
-    // Get all student folders
+    log(`Listing student folders in ${mainFolderId}`);
     const studentFolders = await listAllFiles(
       drive,
       `'${mainFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
       'id, name'
     );
+    log(`Found ${studentFolders.length} student folders`);
 
-    // Search ALL student folders (including duplicates from race conditions)
-    // and collect all matching session folder IDs + the student folder name
+    // Search ALL student folders for this session
     const sessionFolderIds = [];
     let studentFolderName = null;
     for (const studentFolder of studentFolders) {
@@ -62,15 +64,14 @@ module.exports = async (req, res) => {
         if (!studentFolderName) studentFolderName = studentFolder.name;
       }
     }
+    log(`Found ${sessionFolderIds.length} session folder(s) for ${sessionId} (student: ${studentFolderName})`);
 
     if (sessionFolderIds.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Session not found',
-      });
+      log('Session NOT FOUND — returning 404');
+      return res.status(404).json({ success: false, message: 'Session not found' });
     }
 
-    // Fetch files from ALL matching session folders (merging duplicates)
+    // Fetch files from all matching session folders
     const allFiles = [];
     for (const folderId of sessionFolderIds) {
       const files = await listAllFiles(
@@ -80,20 +81,18 @@ module.exports = async (req, res) => {
       );
       allFiles.push(...files);
     }
+    log(`Found ${allFiles.length} total files: ${allFiles.map(f => f.name).join(', ')}`);
 
-    // Check for COMBINED or FINAL videos (these take priority)
-    // FINAL filenames are: email_studentid_test_{deviceType}_FINAL_timestamp.ext
-    // COMBINED filenames are: COMBINED_{deviceType}.ext or email_studentid_COMBINED_{deviceType}_timestamp.mp4
+    // Check for COMBINED or FINAL videos
     const combinedVideos = allFiles.filter(f =>
       f.name.includes(`COMBINED_${deviceType}`) ||
       f.name.includes(`_${deviceType}_FINAL_`)
     );
 
     if (combinedVideos.length > 0) {
-      // Return the most recent combined/final video
       combinedVideos.sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
       const video = combinedVideos[0];
-      console.log(`[get-session-chunks] Found combined/final video: ${video.name}`);
+      log(`COMBINED/FINAL found: ${video.name} — returning single video`);
       return res.json({
         success: true,
         hasCombinedVideo: true,
@@ -107,8 +106,9 @@ module.exports = async (req, res) => {
         }],
       });
     }
+    log(`No COMBINED/FINAL video found for ${deviceType}`);
 
-    // No combined video — gather chunk files for this device type
+    // Gather chunk files
     const chunks = allFiles
       .filter(f => f.name.includes(`${deviceType}_chunk_`))
       .sort((a, b) => {
@@ -118,73 +118,66 @@ module.exports = async (req, res) => {
       });
 
     if (chunks.length === 0) {
+      log(`No chunks found for ${deviceType} — returning empty`);
       return res.json({ success: true, chunks: [] });
     }
 
-    // Auto-combine chunks into a single seekable video
-    console.log(`[get-session-chunks] Auto-combining ${chunks.length} ${deviceType} chunks for session ${sessionId}`);
+    log(`Found ${chunks.length} chunks: ${chunks.map(c => c.name).join(', ')}`);
 
-    // Parse student info from folder name
-    const folderParts = (studentFolderName || '').split('_');
-    const email = folderParts.slice(0, -1).join('_') || 'unknown';
-    const studentId = folderParts[folderParts.length - 1] || 'unknown';
+    // Build chunk URLs for immediate playback
+    const chunksWithUrls = chunks.map(chunk => {
+      const match = chunk.name.match(/_chunk_(\d+)/);
+      return {
+        fileId: chunk.id,
+        fileName: chunk.name,
+        chunkNumber: match ? parseInt(match[1]) : 0,
+        downloadUrl: `/api/stream-chunk?fileId=${chunk.id}`,
+        mimeType: chunk.mimeType,
+      };
+    });
 
-    // Prevent duplicate combines for the same session+device
+    // Kick off background combine (non-blocking) so next play is a single video
     const combineKey = `${sessionId}_${deviceType}`;
-    let combinePromise = combineInProgress.get(combineKey);
+    if (!combineInProgress.has(combineKey)) {
+      const folderParts = (studentFolderName || '').split('_');
+      const email = folderParts.slice(0, -1).join('_') || 'unknown';
+      const studentId = folderParts[folderParts.length - 1] || 'unknown';
 
-    if (!combinePromise) {
-      combinePromise = combineChunkFiles(
+      combineInProgress.add(combineKey);
+      log(`Queuing background combine for ${chunks.length} chunks`);
+
+      combineChunkFiles(
         chunks.map(c => ({ id: c.id, name: c.name })),
         sessionFolderIds[0],
         deviceType,
         email,
         studentId
-      ).finally(() => combineInProgress.delete(combineKey));
-
-      combineInProgress.set(combineKey, combinePromise);
-    }
-
-    // Allow up to 10 minutes for combining
-    req.setTimeout(600000);
-
-    const combineResult = await combinePromise;
-
-    if (combineResult.success) {
-      console.log(`[get-session-chunks] Auto-combine succeeded: ${combineResult.mp4FileName}`);
-      return res.json({
-        success: true,
-        hasCombinedVideo: true,
-        chunks: [{
-          fileId: combineResult.mp4FileId,
-          fileName: combineResult.mp4FileName,
-          chunkNumber: 0,
-          downloadUrl: `/api/stream-chunk?fileId=${combineResult.mp4FileId}`,
-          mimeType: 'video/mp4',
-          isCombined: true,
-        }],
+      ).then(result => {
+        if (result.success) {
+          console.log(`[session-chunks] Background combine DONE: ${result.mp4FileName} (${result.chunksProcessed} chunks)`);
+        } else {
+          console.error(`[session-chunks] Background combine FAILED: ${result.error}`);
+        }
+      }).catch(err => {
+        console.error(`[session-chunks] Background combine ERROR:`, err);
+      }).finally(() => {
+        combineInProgress.delete(combineKey);
       });
+    } else {
+      log(`Background combine already in progress for ${combineKey}`);
     }
 
-    // Combine failed — fall back to first chunk only (better than nothing)
-    console.error(`[get-session-chunks] Auto-combine failed: ${combineResult.error}`);
-    const firstChunk = chunks[0];
+    // Return chunks immediately — don't wait for combine
+    log(`Returning ${chunksWithUrls.length} chunks for immediate playback`);
     res.json({
       success: true,
       hasCombinedVideo: false,
-      chunks: [{
-        fileId: firstChunk.id,
-        fileName: firstChunk.name,
-        chunkNumber: 0,
-        downloadUrl: `/api/stream-chunk?fileId=${firstChunk.id}`,
-        mimeType: firstChunk.mimeType,
-      }],
+      combiningInBackground: true,
+      chunks: chunksWithUrls,
     });
   } catch (error) {
+    log(`ERROR: ${error.message}`);
     console.error('Get session chunks error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch chunks',
-    });
+    res.status(500).json({ success: false, message: 'Failed to fetch chunks: ' + error.message });
   }
 };
