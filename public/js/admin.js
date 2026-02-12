@@ -927,6 +927,8 @@ let multiViewData = {
   sessionId: null,
   email: null,
   videos: { main: null, proctor: null, screen: null },
+  chunks: { main: [], proctor: [], screen: [] },
+  chunkIndex: { main: 0, proctor: 0, screen: 0 },
   currentSpotlight: 'main'
 };
 
@@ -966,14 +968,29 @@ async function openMultiView(sessionId, email) {
       const video = document.getElementById(videoId);
 
       if (result.success && result.chunks && result.chunks.length > 0) {
-        // Use the first chunk or combined video
-        const firstChunk = result.chunks[0];
-        video.src = firstChunk.downloadUrl;
-        video.load();
+        // Store all chunks for this device so we can auto-advance
+        multiViewData.chunks[deviceType] = result.chunks;
+        multiViewData.chunkIndex[deviceType] = 0;
         multiViewData.videos[deviceType] = video;
+
+        // Load first chunk
+        video.src = result.chunks[0].downloadUrl;
+        video.load();
 
         video.onloadeddata = () => {
           box.classList.remove('loading');
+        };
+
+        // Auto-advance to next chunk when current one ends
+        video.onended = () => {
+          const chunks = multiViewData.chunks[deviceType];
+          const nextIdx = multiViewData.chunkIndex[deviceType] + 1;
+          if (nextIdx < chunks.length) {
+            multiViewData.chunkIndex[deviceType] = nextIdx;
+            video.src = chunks[nextIdx].downloadUrl;
+            video.load();
+            video.play().catch(err => console.log('Auto-advance play failed:', err));
+          }
         };
 
         video.onerror = () => {
@@ -1062,6 +1079,8 @@ function closeMultiView() {
     sessionId: null,
     email: null,
     videos: { main: null, proctor: null, screen: null },
+    chunks: { main: [], proctor: [], screen: [] },
+    chunkIndex: { main: 0, proctor: 0, screen: 0 },
     currentSpotlight: 'main'
   };
 }
