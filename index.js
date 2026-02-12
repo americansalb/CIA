@@ -34,6 +34,8 @@ app.post('/api/update-test', require('./api/update-test'));
 app.post('/api/delete-test', require('./api/delete-test'));
 app.post('/api/convert-video', require('./api/convert-video'));
 app.post('/api/combine-chunks', require('./api/combine-chunks'));
+app.post('/api/compile-recording', require('./api/compile-recording').startCompile);
+app.get('/api/compile-status', require('./api/compile-recording').getStatus);
 app.post('/api/split-and-upload', require('./api/split-and-upload'));
 app.post('/api/save-emergency-state', require('./api/save-emergency-state'));
 app.post('/api/log-client-error', require('./api/log-client-error'));

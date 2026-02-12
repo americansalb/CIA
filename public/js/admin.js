@@ -143,7 +143,22 @@ function renderCompactTable(attempts) {
     const date = a.date;
     const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
     const isPractice = a.type === 'practice';
-    const hasVideo = !isPractice && a.videos && a.videos.length > 0;
+    // Real videos = FINAL or COMBINED (not chunk placeholders)
+    const hasRealVideo = !isPractice && a.videos && a.videos.some(v => v.fileId !== 'chunks');
+    // Needs compile = has uncompiled chunks
+    const needsCompile = !isPractice && a.chunkCount && Object.keys(a.chunkCount).length > 0;
+    const totalChunks = needsCompile ? Object.values(a.chunkCount).reduce((s, n) => s + n, 0) : 0;
+
+    let actionHtml = '';
+    if (hasRealVideo) {
+      actionHtml += `<button onclick="openMultiView('${a.sessionId}', '${a.email}')" style="background: #667eea; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Watch</button> `;
+    }
+    if (needsCompile) {
+      actionHtml += `<button id="compile-btn-${a.sessionId}" onclick="compileRecording('${a.sessionId}', this)" style="background: #ff9800; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Compile (${totalChunks} chunks)</button>`;
+    }
+    if (!hasRealVideo && !needsCompile && !isPractice) {
+      actionHtml = '<span style="color: #999; font-size: 11px;">No video</span>';
+    }
 
     return `
       <tr style="border-bottom: 1px solid #eee;">
@@ -159,12 +174,7 @@ function renderCompactTable(attempts) {
             : `<span style="background: ${a.status === 'incomplete' ? '#f44336' : '#4caf50'}; color: white; padding: 2px 8px; border-radius: 10px; font-size: 11px;">${a.status === 'incomplete' ? 'Incomplete' : 'Complete'}</span>`
           }
         </td>
-        <td style="padding: 8px 12px;">
-          ${hasVideo
-            ? `<button onclick="openMultiView('${a.sessionId}', '${a.email}')" style="background: #667eea; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Watch</button>`
-            : '<span style="color: #999; font-size: 11px;">No video</span>'
-          }
-        </td>
+        <td style="padding: 8px 12px;">${actionHtml}</td>
       </tr>
     `;
   }).join('');
@@ -920,6 +930,88 @@ function closeLiveStream() {
 window.switchTab = switchTab;
 
 // ====================
+// COMPILE RECORDING
+// ====================
+
+async function compileRecording(sessionId, button) {
+  console.log(`[Compile] Starting compile for session: ${sessionId}`);
+  const origText = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Starting...';
+  button.style.background = '#6c757d';
+
+  try {
+    const response = await fetch('/api/compile-recording', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    });
+    const result = await response.json();
+
+    if (!result.success) {
+      throw new Error(result.message || 'Compile request failed');
+    }
+
+    if (result.status === 'done') {
+      button.textContent = 'Compiled!';
+      button.style.background = '#4caf50';
+      console.log('[Compile] Already compiled');
+      setTimeout(() => loadRecordings(), 2000);
+      return;
+    }
+
+    // Start polling for status
+    button.textContent = 'Compiling...';
+    button.style.background = '#2196f3';
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusResp = await fetch(`/api/compile-status?sessionId=${encodeURIComponent(sessionId)}`);
+        const statusResult = await statusResp.json();
+        console.log(`[Compile] Poll status:`, statusResult);
+
+        if (!statusResult.success) return;
+
+        // Update button with progress
+        const devices = statusResult.devices || {};
+        const parts = [];
+        for (const [dt, info] of Object.entries(devices)) {
+          if (info.status === 'compiling') parts.push(`${dt}: compiling ${info.chunks} chunks`);
+          else if (info.status === 'queued') parts.push(`${dt}: queued (${info.chunks})`);
+          else if (info.status === 'done') parts.push(`${dt}: done`);
+          else if (info.status === 'error') parts.push(`${dt}: error`);
+        }
+        button.textContent = parts.length > 0 ? parts.join(' | ') : 'Compiling...';
+
+        if (statusResult.status === 'done' || statusResult.status === 'error') {
+          clearInterval(pollInterval);
+          if (statusResult.status === 'done') {
+            button.textContent = 'Compiled!';
+            button.style.background = '#4caf50';
+            console.log('[Compile] All done — refreshing recordings');
+            setTimeout(() => loadRecordings(), 2000);
+          } else {
+            button.textContent = 'Error — click to retry';
+            button.style.background = '#f44336';
+            button.disabled = false;
+            button.onclick = () => compileRecording(sessionId, button);
+          }
+        }
+      } catch (pollErr) {
+        console.error('[Compile] Poll error:', pollErr);
+      }
+    }, 5000); // Poll every 5 seconds
+
+  } catch (error) {
+    console.error('[Compile] Error:', error);
+    button.textContent = 'Failed — click to retry';
+    button.style.background = '#f44336';
+    button.disabled = false;
+    button.onclick = () => compileRecording(sessionId, button);
+  }
+}
+
+// ====================
 // MULTI-VIEW VIDEO PLAYER
 // ====================
 
@@ -927,81 +1019,11 @@ let multiViewData = {
   sessionId: null,
   email: null,
   videos: { main: null, proctor: null, screen: null },
-  chunkLists: { main: [], proctor: [], screen: [] },
-  chunkIndex: { main: 0, proctor: 0, screen: 0 },
-  chunkTimeOffset: { main: 0, proctor: 0, screen: 0 },
-  _preload: {},
   currentSpotlight: 'main'
 };
 
 function mvLog(deviceType, msg) {
   console.log(`[MultiView][${deviceType}] ${msg}`);
-}
-
-function playMvChunk(deviceType, index) {
-  const chunks = multiViewData.chunkLists[deviceType];
-  if (index < 0 || index >= chunks.length) return;
-
-  multiViewData.chunkIndex[deviceType] = index;
-  const chunk = chunks[index];
-  const capType = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
-  const video = document.getElementById(`mv${capType}Video`);
-  const box = document.getElementById(`mv${capType}`);
-  const label = box ? box.querySelector('.mv-label') : null;
-
-  mvLog(deviceType, `Playing chunk ${index + 1}/${chunks.length}: ${chunk.fileName || chunk.fileId}`);
-
-  // Label: just show camera name (seamless — user doesn't see chunk boundaries)
-  if (label) {
-    if (chunk.isCombined) {
-      label.textContent = `${capType} Camera`;
-    } else if (chunks.length > 1) {
-      label.textContent = `${capType} Camera`;
-    } else {
-      label.textContent = `${capType} Camera`;
-    }
-  }
-
-  video.src = chunk.downloadUrl;
-  video.load();
-  multiViewData.videos[deviceType] = video;
-
-  // Preload next chunk so transition is near-instant
-  if (index + 1 < chunks.length) {
-    const nextUrl = chunks[index + 1].downloadUrl;
-    mvLog(deviceType, `Preloading chunk ${index + 2}/${chunks.length}`);
-    const preloadEl = document.createElement('video');
-    preloadEl.preload = 'auto';
-    preloadEl.muted = true;
-    preloadEl.src = nextUrl;
-    preloadEl.load();
-    multiViewData._preload[deviceType] = preloadEl;
-  }
-
-  video.onloadeddata = () => {
-    mvLog(deviceType, `Chunk ${index + 1} ready (duration=${video.duration ? video.duration.toFixed(1) : '?'}s)`);
-    box.classList.remove('loading');
-    video.play().catch(e => mvLog(deviceType, `Autoplay blocked: ${e.message}`));
-  };
-
-  video.onerror = () => {
-    mvLog(deviceType, `Chunk ${index + 1} ERROR: ${video.error ? video.error.message : 'unknown'}`);
-    box.classList.remove('loading');
-    if (index + 1 < chunks.length) {
-      multiViewData.chunkTimeOffset[deviceType] += 60; // estimate 60s for failed chunk
-      playMvChunk(deviceType, index + 1);
-    }
-  };
-
-  video.onended = () => {
-    multiViewData.chunkTimeOffset[deviceType] += video.duration || 0;
-    if (index + 1 < chunks.length) {
-      mvLog(deviceType, `Chunk ${index + 1} ended (total ${multiViewData.chunkTimeOffset[deviceType].toFixed(0)}s) — next`);
-      playMvChunk(deviceType, index + 1);
-    } else {
-      mvLog(deviceType, `All ${chunks.length} chunks finished (total ${multiViewData.chunkTimeOffset[deviceType].toFixed(0)}s)`);
-    }
-  };
 }
 
 async function openMultiView(sessionId, email) {
@@ -1020,8 +1042,6 @@ async function openMultiView(sessionId, email) {
 
   title.textContent = `Multi-View: ${email}`;
   modal.classList.add('active');
-
-  // Reset grid layout
   grid.className = '';
 
   // Show loading state
@@ -1033,7 +1053,7 @@ async function openMultiView(sessionId, email) {
     if (label) label.textContent = `${type} Camera - Loading...`;
   });
 
-  // Fetch all device types in parallel
+  // Fetch all device types in parallel — only combined/FINAL videos play
   const deviceTypes = ['main', 'proctor', 'screen'];
   const fetches = deviceTypes.map(async (deviceType) => {
     const capType = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
@@ -1042,20 +1062,41 @@ async function openMultiView(sessionId, email) {
     const label = box.querySelector('.mv-label');
 
     try {
-      mvLog(deviceType, `Fetching chunks for session=${sessionId}`);
+      mvLog(deviceType, `Fetching video for session=${sessionId}`);
       const response = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
       const result = await response.json();
 
-      mvLog(deviceType, `Response: ${result.chunks ? result.chunks.length : 0} chunks, hasCombined=${result.hasCombinedVideo}, combiningBg=${result.combiningInBackground}`);
+      mvLog(deviceType, `hasCombined=${result.hasCombinedVideo}, videos=${result.chunks ? result.chunks.length : 0}, uncompiled=${result.chunkCount || 0}`);
 
-      if (result.success && result.chunks && result.chunks.length > 0) {
-        multiViewData.chunkLists[deviceType] = result.chunks;
-        playMvChunk(deviceType, 0);
+      if (result.success && result.hasCombinedVideo && result.chunks && result.chunks.length > 0) {
+        // Play the combined/FINAL video
+        const videoData = result.chunks[0];
+        mvLog(deviceType, `Playing combined video: ${videoData.fileName}`);
+        video.src = videoData.downloadUrl;
+        video.load();
+        multiViewData.videos[deviceType] = video;
+
+        video.onloadeddata = () => {
+          box.classList.remove('loading');
+          if (label) label.textContent = `${capType} Camera`;
+          video.play().catch(e => mvLog(deviceType, `Autoplay blocked: ${e.message}`));
+        };
+        video.onerror = () => {
+          box.classList.remove('loading');
+          if (label) label.textContent = `${capType} Camera (Load error)`;
+          mvLog(deviceType, `Video load error: ${video.error ? video.error.message : 'unknown'}`);
+        };
+      } else if (result.chunkCount > 0) {
+        // Has chunks but not compiled yet
+        box.classList.remove('loading');
+        video.src = '';
+        if (label) label.textContent = `${capType} Camera (Not compiled — ${result.chunkCount} chunks)`;
+        mvLog(deviceType, `Not compiled: ${result.chunkCount} chunks need compiling`);
       } else {
-        mvLog(deviceType, 'No chunks found');
         box.classList.remove('loading');
         video.src = '';
         if (label) label.textContent = `${capType} Camera (No recording)`;
+        mvLog(deviceType, 'No recording found');
       }
     } catch (error) {
       mvLog(deviceType, `Fetch ERROR: ${error.message}`);
@@ -1066,8 +1107,6 @@ async function openMultiView(sessionId, email) {
 
   await Promise.all(fetches);
   console.log('[MultiView] All device types loaded');
-
-  // Set initial spotlight
   spotlightVideo('main');
 }
 
@@ -1127,40 +1166,28 @@ function closeMultiView() {
   Object.values(multiViewData.videos).forEach(video => {
     if (video) {
       video.pause();
-      video.onended = null;
       video.onloadeddata = null;
       video.onerror = null;
       video.src = '';
     }
   });
 
-  // Clean up preloaded elements
-  Object.values(multiViewData._preload || {}).forEach(el => {
-    if (el) { el.src = ''; }
-  });
-
   multiViewData = {
     sessionId: null,
     email: null,
     videos: { main: null, proctor: null, screen: null },
-    chunkLists: { main: [], proctor: [], screen: [] },
-    chunkIndex: { main: 0, proctor: 0, screen: 0 },
-    chunkTimeOffset: { main: 0, proctor: 0, screen: 0 },
-    _preload: {},
     currentSpotlight: 'main'
   };
 }
 
-// Update time display (cumulative across all chunks for seamless experience)
+// Update time display
 setInterval(() => {
   const modal = document.getElementById('multiViewModal');
   if (modal.classList.contains('active')) {
-    const dt = multiViewData.currentSpotlight;
-    const video = multiViewData.videos[dt];
+    const video = multiViewData.videos[multiViewData.currentSpotlight];
     if (video && !isNaN(video.currentTime)) {
-      const totalTime = (multiViewData.chunkTimeOffset[dt] || 0) + video.currentTime;
-      const mins = Math.floor(totalTime / 60);
-      const secs = Math.floor(totalTime % 60);
+      const mins = Math.floor(video.currentTime / 60);
+      const secs = Math.floor(video.currentTime % 60);
       document.getElementById('mvTimeDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
     }
   }
