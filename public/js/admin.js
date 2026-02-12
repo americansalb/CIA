@@ -959,19 +959,16 @@ async function openMultiView(sessionId, email) {
 
   for (const deviceType of deviceTypes) {
     try {
-      const box = document.getElementById(`mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`);
+      const capType = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
+      const box = document.getElementById(`mv${capType}`);
+      const video = document.getElementById(`mv${capType}Video`);
       const label = box.querySelector('.mv-label');
-      if (label) label.textContent = `${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)} Camera - Preparing video...`;
+      if (label) label.textContent = `${capType} Camera - Preparing video...`;
 
       const response = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
       const result = await response.json();
 
-      if (label) label.textContent = `${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)} Camera`;
-
-      const boxId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`;
-      const videoId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}Video`;
-      const box = document.getElementById(boxId);
-      const video = document.getElementById(videoId);
+      if (label) label.textContent = `${capType} Camera`;
 
       if (result.success && result.chunks && result.chunks.length > 0) {
         const videoData = result.chunks[0];
@@ -991,8 +988,7 @@ async function openMultiView(sessionId, email) {
         // No video for this device type
         box.classList.remove('loading');
         video.src = '';
-        const label = box.querySelector('.mv-label');
-        label.textContent += ' (No recording)';
+        if (label) label.textContent += ' (No recording)';
       }
     } catch (error) {
       console.error(`Error loading ${deviceType} video:`, error);
