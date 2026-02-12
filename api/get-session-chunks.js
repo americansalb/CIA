@@ -1,8 +1,52 @@
 const { getDrive } = require('../utils/google-auth');
 const { combineChunkFiles } = require('../utils/video-converter');
 
-// Track in-progress combines to avoid duplicate work
+// Serial combine queue — process one at a time to stay under memory limit
 const combineInProgress = new Set();
+const combineQueue = [];
+let combineRunning = false;
+
+async function processCombineQueue() {
+  if (combineRunning || combineQueue.length === 0) return;
+  combineRunning = true;
+
+  const job = combineQueue.shift();
+  const { key, chunkList, folderId, deviceType, email, studentId } = job;
+
+  console.log(`[combine-queue] Starting: ${key} (${chunkList.length} chunks, ${combineQueue.length} queued behind)`);
+
+  try {
+    const result = await combineChunkFiles(chunkList, folderId, deviceType, email, studentId);
+    if (result.success) {
+      console.log(`[combine-queue] DONE: ${result.mp4FileName} (${result.chunksProcessed} chunks, fast=${result.fastMode})`);
+    } else {
+      console.error(`[combine-queue] FAILED: ${result.error}`);
+    }
+  } catch (err) {
+    console.error(`[combine-queue] ERROR:`, err);
+  } finally {
+    combineInProgress.delete(key);
+    combineRunning = false;
+    // Process next in queue
+    if (combineQueue.length > 0) {
+      console.log(`[combine-queue] ${combineQueue.length} job(s) remaining, starting next...`);
+      processCombineQueue();
+    } else {
+      console.log(`[combine-queue] All jobs complete`);
+    }
+  }
+}
+
+function queueCombine(key, chunkList, folderId, deviceType, email, studentId) {
+  if (combineInProgress.has(key)) {
+    console.log(`[combine-queue] Already queued/running: ${key}`);
+    return;
+  }
+  combineInProgress.add(key);
+  combineQueue.push({ key, chunkList, folderId, deviceType, email, studentId });
+  console.log(`[combine-queue] Queued: ${key} (${chunkList.length} chunks, queue size: ${combineQueue.length})`);
+  processCombineQueue();
+}
 
 // Helper to list ALL files with pagination
 async function listAllFiles(drive, query, fields) {
@@ -136,43 +180,21 @@ module.exports = async (req, res) => {
       };
     });
 
-    // Kick off background combine (non-blocking) so next play is a single video
-    // Guard: skip auto-combine for large chunk counts (memory-safe threshold)
-    const MAX_AUTO_COMBINE_CHUNKS = 20;
+    // Queue background combine (serial, one at a time to stay within memory)
     const combineKey = `${sessionId}_${deviceType}`;
+    const folderParts = (studentFolderName || '').split('_');
+    const combineEmail = folderParts.slice(0, -1).join('_') || 'unknown';
+    const combineStudentId = folderParts[folderParts.length - 1] || 'unknown';
 
-    if (chunks.length > MAX_AUTO_COMBINE_CHUNKS) {
-      log(`Skipping auto-combine: ${chunks.length} chunks exceeds limit of ${MAX_AUTO_COMBINE_CHUNKS} — play chunks seamlessly instead`);
-    } else if (combineInProgress.size > 0) {
-      log(`Skipping auto-combine: another combine already running (${[...combineInProgress].join(', ')})`);
-    } else if (!combineInProgress.has(combineKey)) {
-      const folderParts = (studentFolderName || '').split('_');
-      const email = folderParts.slice(0, -1).join('_') || 'unknown';
-      const studentId = folderParts[folderParts.length - 1] || 'unknown';
-
-      combineInProgress.add(combineKey);
-      log(`Queuing background combine for ${chunks.length} chunks`);
-
-      combineChunkFiles(
-        chunks.map(c => ({ id: c.id, name: c.name })),
-        sessionFolderIds[0],
-        deviceType,
-        email,
-        studentId
-      ).then(result => {
-        if (result.success) {
-          console.log(`[session-chunks] Background combine DONE: ${result.mp4FileName} (${result.chunksProcessed} chunks)`);
-        } else {
-          console.error(`[session-chunks] Background combine FAILED: ${result.error}`);
-        }
-      }).catch(err => {
-        console.error(`[session-chunks] Background combine ERROR:`, err);
-      }).finally(() => {
-        combineInProgress.delete(combineKey);
-      });
-    } else {
-      log(`Background combine already in progress for ${combineKey}`);
-    }
+    log(`Queuing background combine for ${chunks.length} chunks (queue: ${combineQueue.length}, running: ${combineRunning})`);
+    queueCombine(
+      combineKey,
+      chunks.map(c => ({ id: c.id, name: c.name })),
+      sessionFolderIds[0],
+      deviceType,
+      combineEmail,
+      combineStudentId
+    );
 
     // Return chunks immediately — don't wait for combine
     log(`Returning ${chunksWithUrls.length} chunks for immediate playback`);
