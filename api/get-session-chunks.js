@@ -77,7 +77,7 @@ module.exports = async (req, res) => {
     // No combined video, get all chunk files for this session and device
     const filesResponse = await drive.files.list({
       q: `'${sessionFolderId}' in parents and name contains '${deviceType}_chunk_' and trashed=false`,
-      fields: 'files(id, name, webContentLink, webViewLink, mimeType)',
+      fields: 'files(id, name, webContentLink, webViewLink, mimeType, createdTime)',
       orderBy: 'name',
       supportsAllDrives: true,
       includeItemsFromAllDrives: true,
@@ -121,6 +121,7 @@ module.exports = async (req, res) => {
         chunkNumber: parseInt(match[1]),
         downloadUrl: `/api/stream-chunk?fileId=${chunk.id}`,
         mimeType: chunk.mimeType,
+        createdTime: chunk.createdTime,
       };
     }).filter(chunk => chunk !== null);
 

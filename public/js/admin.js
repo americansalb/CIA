@@ -927,6 +927,10 @@ let multiViewData = {
   sessionId: null,
   email: null,
   videos: { main: null, proctor: null, screen: null },
+  chunks: { main: [], proctor: [], screen: [] },
+  chunkIndex: { main: 0, proctor: 0, screen: 0 },
+  chunkElapsed: { main: 0, proctor: 0, screen: 0 }, // cumulative time from previous chunks
+  startTimes: { main: null, proctor: null, screen: null }, // first chunk createdTime per device
   currentSpotlight: 'main'
 };
 
@@ -934,6 +938,10 @@ async function openMultiView(sessionId, email) {
   multiViewData.sessionId = sessionId;
   multiViewData.email = email;
   multiViewData.currentSpotlight = 'main';
+  multiViewData.chunks = { main: [], proctor: [], screen: [] };
+  multiViewData.chunkIndex = { main: 0, proctor: 0, screen: 0 };
+  multiViewData.chunkElapsed = { main: 0, proctor: 0, screen: 0 };
+  multiViewData.startTimes = { main: null, proctor: null, screen: null };
 
   const modal = document.getElementById('multiViewModal');
   const title = document.getElementById('multiViewTitle');
@@ -945,17 +953,19 @@ async function openMultiView(sessionId, email) {
   // Reset grid layout
   grid.className = '';
 
-  // Show loading state
+  // Show loading state and reset labels
   ['Main', 'Proctor', 'Screen'].forEach(type => {
     const box = document.getElementById(`mv${type}`);
     box.classList.add('loading');
     box.classList.remove('spotlight');
+    const label = box.querySelector('.mv-label');
+    if (label) label.textContent = type;
   });
 
-  // Fetch chunks for each device type
+  // Fetch chunks for each device type IN PARALLEL
   const deviceTypes = ['main', 'proctor', 'screen'];
 
-  for (const deviceType of deviceTypes) {
+  const fetches = deviceTypes.map(async (deviceType) => {
     try {
       const response = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
       const result = await response.json();
@@ -966,11 +976,23 @@ async function openMultiView(sessionId, email) {
       const video = document.getElementById(videoId);
 
       if (result.success && result.chunks && result.chunks.length > 0) {
-        // Use the first chunk or combined video
-        const firstChunk = result.chunks[0];
-        video.src = firstChunk.downloadUrl;
-        video.load();
+        // Store all chunks for this device
+        multiViewData.chunks[deviceType] = result.chunks;
+        multiViewData.chunkIndex[deviceType] = 0;
+        multiViewData.chunkElapsed[deviceType] = 0;
         multiViewData.videos[deviceType] = video;
+
+        // Store first chunk timestamp for sync
+        if (result.chunks[0].createdTime) {
+          multiViewData.startTimes[deviceType] = new Date(result.chunks[0].createdTime).getTime();
+        }
+
+        // Load first chunk
+        video.src = result.chunks[0].downloadUrl;
+        video.load();
+
+        // Set up sequential chunk playback
+        video.onended = () => loadNextChunk(deviceType);
 
         video.onloadeddata = () => {
           box.classList.remove('loading');
@@ -978,24 +1000,73 @@ async function openMultiView(sessionId, email) {
 
         video.onerror = () => {
           box.classList.remove('loading');
-          console.error(`Failed to load ${deviceType} video`);
+          console.error(`Failed to load ${deviceType} video chunk`);
+          // Try next chunk on error
+          loadNextChunk(deviceType);
         };
+
+        const label = box.querySelector('.mv-label');
+        if (label) {
+          const totalChunks = result.chunks.length;
+          const isCombined = result.chunks[0].isCombined;
+          label.textContent = isCombined
+            ? `${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)} (Combined)`
+            : `${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)} (${totalChunks} chunks)`;
+        }
       } else {
         // No video for this device type
         box.classList.remove('loading');
         video.src = '';
         const label = box.querySelector('.mv-label');
-        label.textContent += ' (No recording)';
+        if (label) label.textContent = `${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)} (No recording)`;
       }
     } catch (error) {
       console.error(`Error loading ${deviceType} video:`, error);
       const boxId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`;
       document.getElementById(boxId).classList.remove('loading');
     }
+  });
+
+  await Promise.all(fetches);
+
+  // Log sync info
+  const startTimes = multiViewData.startTimes;
+  const validStarts = Object.entries(startTimes).filter(([, t]) => t !== null);
+  if (validStarts.length > 1) {
+    const earliest = Math.min(...validStarts.map(([, t]) => t));
+    validStarts.forEach(([device, t]) => {
+      const offset = ((t - earliest) / 1000).toFixed(1);
+      console.log(`[Sync] ${device} started ${offset}s after earliest`);
+    });
   }
 
   // Set initial spotlight
   spotlightVideo('main');
+}
+
+function loadNextChunk(deviceType) {
+  const video = multiViewData.videos[deviceType];
+  const chunks = multiViewData.chunks[deviceType];
+  const currentIdx = multiViewData.chunkIndex[deviceType];
+
+  if (!video || !chunks || currentIdx >= chunks.length - 1) {
+    console.log(`[Player] ${deviceType}: All chunks played (${currentIdx + 1}/${chunks.length})`);
+    return;
+  }
+
+  // Track elapsed time from previous chunks
+  if (video.duration && !isNaN(video.duration)) {
+    multiViewData.chunkElapsed[deviceType] += video.duration;
+  }
+
+  // Load next chunk
+  const nextIdx = currentIdx + 1;
+  multiViewData.chunkIndex[deviceType] = nextIdx;
+  console.log(`[Player] ${deviceType}: Loading chunk ${nextIdx + 1}/${chunks.length}`);
+
+  video.src = chunks[nextIdx].downloadUrl;
+  video.load();
+  video.play().catch(err => console.log('Auto-play next chunk failed:', err));
 }
 
 function spotlightVideo(deviceType) {
@@ -1013,26 +1084,70 @@ function spotlightVideo(deviceType) {
   multiViewData.currentSpotlight = deviceType;
 }
 
+function getVideoGlobalTime(deviceType) {
+  const video = multiViewData.videos[deviceType];
+  if (!video) return 0;
+  return multiViewData.chunkElapsed[deviceType] + (video.currentTime || 0);
+}
+
+// Seek to a global time across chunks for a device type
+function seekToGlobalTime(deviceType, targetTime) {
+  const chunks = multiViewData.chunks[deviceType];
+  const video = multiViewData.videos[deviceType];
+  if (!video || !chunks || chunks.length === 0) return;
+
+  // For combined videos (single chunk), just seek directly
+  if (chunks.length === 1 || chunks[0].isCombined) {
+    video.currentTime = targetTime;
+    return;
+  }
+
+  // For chunked videos, we'd need to know each chunk's duration
+  // Since we don't have that upfront, just seek within current chunk
+  video.currentTime = targetTime - multiViewData.chunkElapsed[deviceType];
+}
+
 function syncAllVideos() {
-  // Get the current time of the spotlight video
-  const spotlightVideo = multiViewData.videos[multiViewData.currentSpotlight];
-  if (!spotlightVideo) return;
+  // Get the global time of the spotlight video (accounting for chunk elapsed)
+  const spotlightDevice = multiViewData.currentSpotlight;
+  const spotlightGlobalTime = getVideoGlobalTime(spotlightDevice);
 
-  const currentTime = spotlightVideo.currentTime;
+  // Calculate sync using actual start time offsets
+  const startTimes = multiViewData.startTimes;
+  const spotlightStart = startTimes[spotlightDevice];
 
-  // Sync all other videos to this time
-  Object.values(multiViewData.videos).forEach(video => {
-    if (video && video !== spotlightVideo) {
-      video.currentTime = currentTime;
+  Object.entries(multiViewData.videos).forEach(([deviceType, video]) => {
+    if (!video || deviceType === spotlightDevice) return;
+
+    const deviceStart = startTimes[deviceType];
+
+    if (spotlightStart && deviceStart) {
+      // Sync using actual timestamps: if screen started 5s after main,
+      // when main is at 10s, screen should be at 5s
+      const offsetSecs = (deviceStart - spotlightStart) / 1000;
+      const targetTime = spotlightGlobalTime - offsetSecs;
+
+      if (targetTime >= 0) {
+        seekToGlobalTime(deviceType, targetTime);
+        console.log(`[Sync] ${deviceType}: offset=${offsetSecs.toFixed(1)}s, seeking to ${targetTime.toFixed(1)}s`);
+      } else {
+        // This video hasn't started yet at this point in time
+        video.pause();
+        video.currentTime = 0;
+        console.log(`[Sync] ${deviceType}: not started yet (offset=${offsetSecs.toFixed(1)}s)`);
+      }
+    } else {
+      // No timestamp info, fall back to matching global time
+      seekToGlobalTime(deviceType, spotlightGlobalTime);
     }
   });
 
-  console.log(`Synced all videos to ${currentTime.toFixed(1)}s`);
+  console.log(`Synced all videos (spotlight ${spotlightDevice} at ${spotlightGlobalTime.toFixed(1)}s)`);
 }
 
 function playAllVideos() {
   Object.values(multiViewData.videos).forEach(video => {
-    if (video) {
+    if (video && video.src) {
       video.play().catch(err => console.log('Play failed:', err));
     }
   });
@@ -1055,6 +1170,7 @@ function closeMultiView() {
     if (video) {
       video.pause();
       video.src = '';
+      video.onended = null;
     }
   });
 
@@ -1062,20 +1178,27 @@ function closeMultiView() {
     sessionId: null,
     email: null,
     videos: { main: null, proctor: null, screen: null },
+    chunks: { main: [], proctor: [], screen: [] },
+    chunkIndex: { main: 0, proctor: 0, screen: 0 },
+    chunkElapsed: { main: 0, proctor: 0, screen: 0 },
+    startTimes: { main: null, proctor: null, screen: null },
     currentSpotlight: 'main'
   };
 }
 
-// Update time display
+// Update time display (uses global time across chunks)
 setInterval(() => {
   const modal = document.getElementById('multiViewModal');
   if (modal.classList.contains('active')) {
-    const video = multiViewData.videos[multiViewData.currentSpotlight];
-    if (video && !isNaN(video.currentTime)) {
-      const time = video.currentTime;
+    const device = multiViewData.currentSpotlight;
+    const time = getVideoGlobalTime(device);
+    if (!isNaN(time)) {
       const mins = Math.floor(time / 60);
       const secs = Math.floor(time % 60);
-      document.getElementById('mvTimeDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+      const chunkInfo = multiViewData.chunks[device]?.length > 1
+        ? ` [${multiViewData.chunkIndex[device] + 1}/${multiViewData.chunks[device].length}]`
+        : '';
+      document.getElementById('mvTimeDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}${chunkInfo}`;
     }
   }
 }, 500);
