@@ -1015,30 +1015,22 @@ async function compileRecording(sessionId, button, force) {
 // MULTI-VIEW VIDEO PLAYER
 // ====================
 
-let multiViewData = {
-  sessionId: null,
-  email: null,
-  videos: { main: null, proctor: null, screen: null },
-  currentSpotlight: 'main'
+let mv = {
+  videos: {},       // deviceType -> video element
+  chunks: {},       // deviceType -> chunk array
+  chunkIdx: {},     // deviceType -> current chunk index
+  startTimes: {},   // deviceType -> epoch ms (real recording start time)
+  spotlight: 'main'
 };
 
-function mvLog(deviceType, msg) {
-  console.log(`[MultiView][${deviceType}] ${msg}`);
-}
-
 async function openMultiView(sessionId, email) {
-  console.log(`[MultiView] Opening for session=${sessionId} email=${email}`);
-  multiViewData.sessionId = sessionId;
-  multiViewData.email = email;
-  multiViewData.currentSpotlight = 'main';
+  console.log(`[MultiView] Opening session=${sessionId}`);
+  mv = { videos: {}, chunks: {}, chunkIdx: {}, startTimes: {}, spotlight: 'main' };
 
   const modal = document.getElementById('multiViewModal');
-  const title = document.getElementById('multiViewTitle');
-  const grid = document.getElementById('multiViewGrid');
-
-  title.textContent = `Multi-View: ${email}`;
+  document.getElementById('multiViewTitle').textContent = `Multi-View: ${email}`;
   modal.classList.add('active');
-  grid.className = '';
+  document.getElementById('multiViewGrid').className = '';
 
   // Show loading state
   ['Main', 'Proctor', 'Screen'].forEach(type => {
@@ -1046,147 +1038,160 @@ async function openMultiView(sessionId, email) {
     box.classList.add('loading');
     box.classList.remove('spotlight');
     const label = box.querySelector('.mv-label');
-    if (label) label.textContent = `${type} Camera - Loading...`;
+    if (label) label.textContent = `${type} - Loading...`;
   });
 
-  // Fetch all device types in parallel — only combined/FINAL videos play
-  const deviceTypes = ['main', 'proctor', 'screen'];
-  const fetches = deviceTypes.map(async (deviceType) => {
-    const capType = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
-    const box = document.getElementById(`mv${capType}`);
-    const video = document.getElementById(`mv${capType}Video`);
+  // Fetch all device types in parallel
+  const devices = ['main', 'proctor', 'screen'];
+  await Promise.all(devices.map(async (dev) => {
+    const cap = dev.charAt(0).toUpperCase() + dev.slice(1);
+    const box = document.getElementById(`mv${cap}`);
+    const video = document.getElementById(`mv${cap}Video`);
     const label = box.querySelector('.mv-label');
 
     try {
-      mvLog(deviceType, `Fetching video for session=${sessionId}`);
-      const response = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
-      const result = await response.json();
+      const resp = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(dev)}`);
+      const data = await resp.json();
 
-      mvLog(deviceType, `hasCombined=${result.hasCombinedVideo}, videos=${result.chunks ? result.chunks.length : 0}, uncompiled=${result.chunkCount || 0}`);
-
-      if (result.success && result.hasCombinedVideo && result.chunks && result.chunks.length > 0) {
-        // Play the combined/FINAL video
-        const videoData = result.chunks[0];
-        mvLog(deviceType, `Playing combined video: ${videoData.fileName}`);
-        video.src = videoData.downloadUrl;
-        video.load();
-        multiViewData.videos[deviceType] = video;
-
-        video.onloadeddata = () => {
-          box.classList.remove('loading');
-          if (label) label.textContent = `${capType} Camera`;
-          video.play().catch(e => mvLog(deviceType, `Autoplay blocked: ${e.message}`));
-        };
-        video.onerror = () => {
-          box.classList.remove('loading');
-          if (label) label.textContent = `${capType} Camera (Load error)`;
-          mvLog(deviceType, `Video load error: ${video.error ? video.error.message : 'unknown'}`);
-        };
-      } else if (result.chunkCount > 0) {
-        // Has chunks but not compiled yet
+      if (!data.success || !data.chunks || data.chunks.length === 0) {
         box.classList.remove('loading');
-        video.src = '';
-        if (label) label.textContent = `${capType} Camera (Not compiled — ${result.chunkCount} chunks)`;
-        mvLog(deviceType, `Not compiled: ${result.chunkCount} chunks need compiling`);
-      } else {
-        box.classList.remove('loading');
-        video.src = '';
-        if (label) label.textContent = `${capType} Camera (No recording)`;
-        mvLog(deviceType, 'No recording found');
+        if (label) label.textContent = `${cap} (No recording)`;
+        return;
       }
-    } catch (error) {
-      mvLog(deviceType, `Fetch ERROR: ${error.message}`);
-      box.classList.remove('loading');
-      if (label) label.textContent = `${capType} Camera (Error)`;
-    }
-  });
 
-  await Promise.all(fetches);
-  console.log('[MultiView] All device types loaded');
+      // Store chunks and video element
+      mv.videos[dev] = video;
+      mv.chunks[dev] = data.chunks;
+      mv.chunkIdx[dev] = 0;
+
+      // Store real start time for sync
+      if (data.createdTime) {
+        mv.startTimes[dev] = new Date(data.createdTime).getTime();
+      }
+
+      // Label
+      const isCombined = data.hasCombinedVideo;
+      if (label) {
+        label.textContent = isCombined ? `${cap} (Combined)` : `${cap} (${data.chunks.length} chunks)`;
+      }
+
+      // Load first chunk
+      video.src = data.chunks[0].downloadUrl;
+      video.load();
+
+      video.onloadeddata = () => {
+        box.classList.remove('loading');
+        video.play().catch(() => {});
+      };
+
+      video.onerror = () => {
+        box.classList.remove('loading');
+        console.error(`[MultiView] ${dev} load error`);
+        mvNextChunk(dev); // Try next chunk on error
+      };
+
+      // Chain to next chunk when current ends
+      video.onended = () => mvNextChunk(dev);
+
+    } catch (err) {
+      console.error(`[MultiView] ${dev} fetch error:`, err);
+      box.classList.remove('loading');
+      if (label) label.textContent = `${cap} (Error)`;
+    }
+  }));
+
+  // Log start time offsets for debugging
+  const starts = Object.entries(mv.startTimes);
+  if (starts.length > 1) {
+    const earliest = Math.min(...starts.map(([, t]) => t));
+    starts.forEach(([d, t]) => console.log(`[Sync] ${d} started ${((t - earliest) / 1000).toFixed(1)}s after earliest`));
+  }
+
   spotlightVideo('main');
 }
 
-function spotlightVideo(deviceType) {
-  const grid = document.getElementById('multiViewGrid');
+function mvNextChunk(dev) {
+  const video = mv.videos[dev];
+  const chunks = mv.chunks[dev];
+  const idx = mv.chunkIdx[dev];
+  if (!video || !chunks || idx >= chunks.length - 1) return;
 
-  // Remove all spotlight classes
-  grid.className = '';
-  document.querySelectorAll('.mv-video-box').forEach(box => box.classList.remove('spotlight'));
-
-  // Add spotlight class
-  grid.classList.add(`spotlight-${deviceType}`);
-  const boxId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`;
-  document.getElementById(boxId).classList.add('spotlight');
-
-  multiViewData.currentSpotlight = deviceType;
+  mv.chunkIdx[dev] = idx + 1;
+  console.log(`[MultiView] ${dev}: loading chunk ${idx + 2}/${chunks.length}`);
+  video.src = chunks[idx + 1].downloadUrl;
+  video.load();
+  video.play().catch(() => {});
 }
 
-function syncAllVideos() {
-  // Get the current time of the spotlight video
-  const spotlightVideo = multiViewData.videos[multiViewData.currentSpotlight];
-  if (!spotlightVideo) return;
-
-  const currentTime = spotlightVideo.currentTime;
-
-  // Sync all other videos to this time
-  Object.values(multiViewData.videos).forEach(video => {
-    if (video && video !== spotlightVideo) {
-      video.currentTime = currentTime;
-    }
-  });
-
-  console.log(`Synced all videos to ${currentTime.toFixed(1)}s`);
+function spotlightVideo(dev) {
+  const grid = document.getElementById('multiViewGrid');
+  grid.className = `spotlight-${dev}`;
+  document.querySelectorAll('.mv-video-box').forEach(b => b.classList.remove('spotlight'));
+  document.getElementById(`mv${dev.charAt(0).toUpperCase() + dev.slice(1)}`).classList.add('spotlight');
+  mv.spotlight = dev;
 }
 
 function playAllVideos() {
-  Object.values(multiViewData.videos).forEach(video => {
-    if (video) {
-      video.play().catch(err => console.log('Play failed:', err));
-    }
-  });
+  Object.values(mv.videos).forEach(v => { if (v && v.src) v.play().catch(() => {}); });
 }
 
 function pauseAllVideos() {
-  Object.values(multiViewData.videos).forEach(video => {
-    if (video) {
-      video.pause();
+  Object.values(mv.videos).forEach(v => { if (v) v.pause(); });
+}
+
+function syncAllVideos() {
+  // Sync using REAL timestamps (createdTime), not relative time
+  const refDev = mv.spotlight;
+  const refVideo = mv.videos[refDev];
+  if (!refVideo) return;
+
+  const refStart = mv.startTimes[refDev];
+  const refPlayhead = refVideo.currentTime;
+
+  Object.entries(mv.videos).forEach(([dev, video]) => {
+    if (dev === refDev || !video) return;
+
+    const devStart = mv.startTimes[dev];
+    if (refStart && devStart) {
+      // Real time offset: how much later this device started recording
+      const offsetSecs = (devStart - refStart) / 1000;
+      // If main is at 60s and proctor started 10s later, proctor should be at 50s
+      const target = refPlayhead - offsetSecs;
+      if (target >= 0) {
+        video.currentTime = target;
+        console.log(`[Sync] ${dev}: offset=${offsetSecs.toFixed(1)}s, seeking to ${target.toFixed(1)}s`);
+      } else {
+        video.currentTime = 0;
+        video.pause();
+        console.log(`[Sync] ${dev}: hasn't started yet (offset=${offsetSecs.toFixed(1)}s)`);
+      }
+    } else {
+      // Fallback: sync to same playhead position
+      video.currentTime = refPlayhead;
     }
   });
 }
 
 function closeMultiView() {
-  const modal = document.getElementById('multiViewModal');
-  modal.classList.remove('active');
-
-  // Stop all videos and clear event handlers
-  Object.values(multiViewData.videos).forEach(video => {
-    if (video) {
-      video.pause();
-      video.onloadeddata = null;
-      video.onerror = null;
-      video.src = '';
-    }
+  document.getElementById('multiViewModal').classList.remove('active');
+  Object.values(mv.videos).forEach(v => {
+    if (v) { v.pause(); v.src = ''; v.onended = null; v.onloadeddata = null; v.onerror = null; }
   });
-
-  multiViewData = {
-    sessionId: null,
-    email: null,
-    videos: { main: null, proctor: null, screen: null },
-    currentSpotlight: 'main'
-  };
+  mv = { videos: {}, chunks: {}, chunkIdx: {}, startTimes: {}, spotlight: 'main' };
 }
 
-// Update time display
+// Time display update
 setInterval(() => {
   const modal = document.getElementById('multiViewModal');
-  if (modal.classList.contains('active')) {
-    const video = multiViewData.videos[multiViewData.currentSpotlight];
-    if (video && !isNaN(video.currentTime)) {
-      const mins = Math.floor(video.currentTime / 60);
-      const secs = Math.floor(video.currentTime % 60);
-      document.getElementById('mvTimeDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-    }
-  }
+  if (!modal.classList.contains('active')) return;
+  const video = mv.videos[mv.spotlight];
+  if (!video || isNaN(video.currentTime)) return;
+  const t = video.currentTime;
+  const mins = Math.floor(t / 60);
+  const secs = Math.floor(t % 60);
+  const chunks = mv.chunks[mv.spotlight];
+  const info = chunks && chunks.length > 1 ? ` [${mv.chunkIdx[mv.spotlight] + 1}/${chunks.length}]` : '';
+  document.getElementById('mvTimeDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}${info}`;
 }, 500);
 
 // Verification log at end of script
