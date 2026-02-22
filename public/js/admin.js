@@ -1437,60 +1437,37 @@ async function mvInitDevice(sessionId, deviceType) {
         box.classList.remove('loading');
         video.play().catch(e => console.warn(`[MVP][${deviceType}] Autoplay blocked:`, e.message));
       };
-      video.onerror = () => {
+      video.onerror = async () => {
         box.classList.remove('loading');
-        console.error(`[MVP][${deviceType}] Combined video failed to load — offering recompile`);
-        if (label) label.textContent = `${cap} (Playback error — recompile recommended)`;
-        // Show recompile overlay so user can recover
+        console.error(`[MVP][${deviceType}] Combined video failed to load — offering alternatives`);
+        if (label) label.textContent = `${cap} (Playback error)`;
+
+        // Fetch raw chunks so Download & Play has data to work with
+        const device = mvState.devices[deviceType];
+        try {
+          const rawResp = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
+          const rawData = await rawResp.json();
+          if (rawData.success && rawData.chunks && !rawData.hasCombinedVideo && device) {
+            device.chunks = rawData.chunks;
+            device.needsCompile = true;
+            device.isCombined = false;
+          }
+        } catch (e) { console.warn('Could not fetch raw chunks:', e); }
+
+        const hasRawChunks = device && device.chunks && device.chunks.length > 0 && !device.isCombined;
+
         const overlay = document.createElement('div');
         overlay.className = 'mv-compile-overlay';
         overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);z-index:5;color:white;text-align:center;padding:20px;';
         overlay.innerHTML = `
           <div style="font-size:36px;margin-bottom:12px;">⚠️</div>
           <div style="font-size:14px;font-weight:600;margin-bottom:8px;">Combined video failed to play</div>
-          <div style="font-size:12px;color:#aaa;margin-bottom:16px;">The compiled video may be corrupted. Try downloading raw chunks or recompiling.</div>
-          <button onclick="mvDownloadAndPlay('${deviceType}')" style="background:#2196f3;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;margin-bottom:10px;">Download & Play Now</button>
-          <div style="font-size:11px;color:#888;margin-bottom:12px;">Instant — downloads raw chunks and plays in browser</div>
-          <button onclick="mvTriggerCompile('${sessionId}', this)" style="background:#ff9800;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;">Recompile (force)</button>
-          <div style="font-size:11px;color:#888;margin-top:4px;">Slower — creates a permanent seekable MP4</div>
+          <div style="font-size:12px;color:#aaa;margin-bottom:12px;">The compiled video may be corrupted.</div>
+          ${hasRawChunks ? `<button onclick="mvDownloadAndPlay('${deviceType}', this)" style="background:#2196f3;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;margin-bottom:8px;">Download & Play (${device.chunks.length} chunks)</button>
+          <div style="font-size:11px;color:#888;margin-bottom:10px;">Instant — combines chunks in browser</div>` : ''}
+          <button onclick="mvForceRecompile('${sessionId}', this)" style="background:#ff9800;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;">Recompile (force)</button>
+          <div style="font-size:11px;color:#888;margin-top:4px;">Slower — creates seekable MP4 on server</div>
         `;
-        // Override to use force=true for recompile
-        overlay.querySelector('button').onclick = async function() {
-          this.disabled = true;
-          this.textContent = 'Recompiling...';
-          this.style.background = '#6c757d';
-          try {
-            const response = await fetch('/api/compile-recording', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ sessionId, force: true }),
-            });
-            const result = await response.json();
-            if (!result.success) throw new Error(result.message);
-            this.textContent = 'Recompiling... (this may take a few minutes)';
-            const pollId = setInterval(async () => {
-              try {
-                const sr = await fetch('/api/compile-status?sessionId=' + encodeURIComponent(sessionId));
-                const sd = await sr.json();
-                if (sd.status === 'done') {
-                  clearInterval(pollId);
-                  const email = document.getElementById('multiViewTitle').textContent.replace('Multi-View: ', '');
-                  closeMultiView();
-                  openMultiView(sessionId, email);
-                } else if (sd.status === 'error') {
-                  clearInterval(pollId);
-                  this.textContent = 'Failed — click to retry';
-                  this.style.background = '#f44336';
-                  this.disabled = false;
-                }
-              } catch (e) { console.error('[MVP] Poll error:', e); }
-            }, 5000);
-          } catch (err) {
-            this.textContent = 'Failed — click to retry';
-            this.style.background = '#f44336';
-            this.disabled = false;
-          }
-        };
         box.appendChild(overlay);
       };
       console.log(`[MVP][${deviceType}] Playing combined video directly`);
@@ -1605,6 +1582,69 @@ async function mvTriggerCompile(sessionId, button) {
     button.style.background = '#f44336';
     button.disabled = false;
     button.onclick = () => mvTriggerCompile(sessionId, button);
+  }
+}
+
+// Download all raw chunks, concatenate in browser, and play as single video in multi-view
+// Force-recompile from error overlay (uses force=true to delete corrupted combined videos)
+async function mvForceRecompile(sessionId, button) {
+  button.disabled = true;
+  button.textContent = 'Recompiling...';
+  button.style.background = '#6c757d';
+
+  try {
+    const response = await fetch('/api/compile-recording', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, force: true }),
+    });
+    const result = await response.json();
+    if (!result.success) throw new Error(result.message);
+
+    if (result.status === 'done') {
+      button.textContent = 'Done! Reopening...';
+      button.style.background = '#4caf50';
+      setTimeout(() => {
+        const email = document.getElementById('multiViewTitle').textContent.replace('Multi-View: ', '');
+        closeMultiView();
+        openMultiView(sessionId, email);
+      }, 1500);
+      return;
+    }
+
+    button.textContent = 'Recompiling... (may take several minutes)';
+    const pollId = setInterval(async () => {
+      try {
+        const sr = await fetch('/api/compile-status?sessionId=' + encodeURIComponent(sessionId));
+        const sd = await sr.json();
+        if (sd.status === 'done') {
+          clearInterval(pollId);
+          button.textContent = 'Done! Reopening...';
+          button.style.background = '#4caf50';
+          setTimeout(() => {
+            const email = document.getElementById('multiViewTitle').textContent.replace('Multi-View: ', '');
+            closeMultiView();
+            openMultiView(sessionId, email);
+          }, 1500);
+        } else if (sd.status === 'error') {
+          clearInterval(pollId);
+          button.textContent = 'Failed — click to retry';
+          button.style.background = '#f44336';
+          button.disabled = false;
+          button.onclick = () => mvForceRecompile(sessionId, button);
+        } else {
+          // Show per-device progress
+          const devices = sd.devices || {};
+          const parts = Object.entries(devices).map(([dt, info]) => `${dt}: ${info.status}`);
+          if (parts.length) button.textContent = parts.join(' | ');
+        }
+      } catch (e) { console.error('[MVP] Poll error:', e); }
+    }, 5000);
+  } catch (err) {
+    button.textContent = 'Failed — click to retry';
+    button.style.background = '#f44336';
+    button.disabled = false;
+    button.onclick = () => mvForceRecompile(sessionId, button);
   }
 }
 
