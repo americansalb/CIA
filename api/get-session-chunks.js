@@ -27,11 +27,13 @@ module.exports = async (req, res) => {
   const log = (msg) => console.log(`[session-chunks ${Date.now() - t0}ms] ${msg}`);
 
   try {
-    const { sessionId, deviceType } = req.query;
+    const { sessionId, deviceType, raw } = req.query;
 
     if (!sessionId || !deviceType) {
       return res.status(400).json({ success: false, message: 'Session ID and device type are required' });
     }
+
+    const forceRaw = raw === 'true'; // Skip combined video detection
 
     log(`START sessionId=${sessionId} deviceType=${deviceType}`);
 
@@ -88,7 +90,7 @@ module.exports = async (req, res) => {
       f.name.includes(`_${deviceAbbrev}_FINAL_CONVERTED_`)
     );
 
-    if (combinedVideos.length > 0) {
+    if (combinedVideos.length > 0 && !forceRaw) {
       combinedVideos.sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
       const video = combinedVideos[0];
       log(`Found combined/FINAL: ${video.name}`);

@@ -1448,8 +1448,11 @@ async function mvInitDevice(sessionId, deviceType) {
         overlay.innerHTML = `
           <div style="font-size:36px;margin-bottom:12px;">⚠️</div>
           <div style="font-size:14px;font-weight:600;margin-bottom:8px;">Combined video failed to play</div>
-          <div style="font-size:12px;color:#aaa;margin-bottom:16px;">The compiled video may be corrupted. Try recompiling.</div>
+          <div style="font-size:12px;color:#aaa;margin-bottom:16px;">The compiled video may be corrupted. Try downloading raw chunks or recompiling.</div>
+          <button onclick="mvDownloadAndPlay('${deviceType}')" style="background:#2196f3;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;margin-bottom:10px;">Download & Play Now</button>
+          <div style="font-size:11px;color:#888;margin-bottom:12px;">Instant — downloads raw chunks and plays in browser</div>
           <button onclick="mvTriggerCompile('${sessionId}', this)" style="background:#ff9800;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;">Recompile (force)</button>
+          <div style="font-size:11px;color:#888;margin-top:4px;">Slower — creates a permanent seekable MP4</div>
         `;
         // Override to use force=true for recompile
         overlay.querySelector('button').onclick = async function() {
@@ -1610,17 +1613,29 @@ async function mvDownloadAndPlay(deviceType, button) {
   const cap = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
   const box = document.getElementById(`mv${cap}`);
   const device = mvState.devices[deviceType];
-  if (!device || !device.chunks || device.chunks.length === 0) return;
+  if (!device) return;
 
   const label = box.querySelector('.mv-label');
   if (button) {
     button.disabled = true;
-    button.textContent = 'Downloading...';
+    button.textContent = 'Fetching chunks...';
     button.style.background = '#6c757d';
   }
 
   try {
-    const chunks = device.chunks;
+    // If current chunks are combined (or only 1 entry), re-fetch raw chunks from API
+    let chunks = device.chunks;
+    if (!chunks || chunks.length === 0 || (chunks.length === 1 && chunks[0].isCombined)) {
+      console.log(`[MVP][${deviceType}] Re-fetching raw chunks (current data is combined)`);
+      const resp = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(mvState.sessionId)}&deviceType=${encodeURIComponent(deviceType)}&raw=true`);
+      const data = await resp.json();
+      if (!data.success || !data.chunks || data.chunks.length === 0) {
+        throw new Error('No raw chunks found');
+      }
+      chunks = data.chunks;
+      device.chunks = chunks;
+      console.log(`[MVP][${deviceType}] Got ${chunks.length} raw chunks`);
+    }
     const blobs = [];
     for (let i = 0; i < chunks.length; i++) {
       const response = await fetch(chunks[i].downloadUrl);
