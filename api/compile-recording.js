@@ -220,10 +220,10 @@ async function startCompile(req, res) {
       const existingCombined = allFiles.filter(f =>
         f.name.includes(`COMBINED_${deviceType}`)
       );
-      // FINAL videos use abbreviated device type (m/p/s)
+      // Only skip compilation for CONVERTED finals (seekable MP4), not raw FINAL WebMs
       const deviceAbbrev = deviceType[0];
       const hasFinal = allFiles.some(f =>
-        f.name.includes(`_${deviceAbbrev}_FINAL_`)
+        f.name.includes(`_${deviceAbbrev}_FINAL_CONVERTED_`)
       );
 
       if (force && existingCombined.length > 0) {
@@ -371,7 +371,7 @@ async function triggerCompile(sessionId) {
   for (const deviceType of ['main', 'proctor', 'screen']) {
     const existingCombined = allFiles.filter(f => f.name.includes(`COMBINED_${deviceType}`));
     const deviceAbbrev = deviceType[0];
-    const hasFinal = allFiles.some(f => f.name.includes(`_${deviceAbbrev}_FINAL_`));
+    const hasFinal = allFiles.some(f => f.name.includes(`_${deviceAbbrev}_FINAL_CONVERTED_`));
 
     if (existingCombined.length > 0 || hasFinal) {
       status.devices[deviceType] = { status: 'done', chunks: 0, note: 'already compiled' };

@@ -76,12 +76,16 @@ module.exports = async (req, res) => {
     }
     log(`Found ${allFiles.length} total files`);
 
-    // Look for COMBINED or FINAL videos only
-    // FINAL videos use abbreviated device type (m/p/s), COMBINED uses full name
+    // Look for properly compiled videos only:
+    // - COMBINED_* = FFmpeg concat output (seekable MP4)
+    // - _FINAL_CONVERTED_ = FFmpeg WebM-to-MP4 conversion (seekable MP4)
+    // NOTE: Raw _FINAL_ WebM blobs from MediaRecorder are NOT seekable
+    // and will stall after the first buffered segment. Do NOT treat them
+    // as combined videos — they need compilation first.
     const deviceAbbrev = deviceType[0]; // main->m, proctor->p, screen->s
     const combinedVideos = allFiles.filter(f =>
       f.name.includes(`COMBINED_${deviceType}`) ||
-      f.name.includes(`_${deviceAbbrev}_FINAL_`)
+      f.name.includes(`_${deviceAbbrev}_FINAL_CONVERTED_`)
     );
 
     if (combinedVideos.length > 0) {
