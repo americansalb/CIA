@@ -559,9 +559,10 @@ async function openVideoPlayer(sessionId, deviceType, studentEmail) {
           Compile Now
         </button>
         <div style="margin-top: 16px; border-top: 1px solid #333; padding-top: 16px;">
-          <button onclick="forcePlayRawChunks()" style="background: transparent; color: #666; border: 1px solid #444; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-            Try playing raw chunks anyway (may crash)
+          <button onclick="forcePlayRawChunks()" style="background: #2196f3; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;">
+            Download &amp; Play Now
           </button>
+          <div style="font-size: 11px; color: #666; margin-top: 6px;">Downloads all chunks, combines in browser</div>
         </div>
       </div>
     `;
@@ -580,14 +581,64 @@ async function openVideoPlayer(sessionId, deviceType, studentEmail) {
   }
 }
 
-// Allow users to force-play raw chunks if they want (with warning)
-function forcePlayRawChunks() {
+// Download all raw chunks, concatenate in browser, and play as a single video.
+// MediaRecorder WebM chunks are contiguous slices of the output stream —
+// concatenating them reconstructs the original playable WebM.
+async function forcePlayRawChunks() {
   const videoLoading = document.getElementById('videoLoading');
-  videoLoading.style.display = 'none';
-  videoElement.style.display = 'block';
-  document.getElementById('prevChunkBtn').style.display = '';
-  document.getElementById('nextChunkBtn').style.display = '';
-  playChunk(0);
+
+  videoLoading.style.display = 'block';
+  videoLoading.innerHTML = `
+    <div style="text-align: center;">
+      <div style="font-size: 14px; font-weight: 600;">Downloading chunks...</div>
+      <div id="chunkDownloadProgress" style="font-size: 12px; color: #aaa; margin-top: 8px;">0 / ${currentChunks.length}</div>
+      <div style="width: 200px; height: 4px; background: #333; border-radius: 2px; margin: 12px auto;">
+        <div id="chunkDownloadBar" style="width: 0%; height: 100%; background: #2196f3; border-radius: 2px; transition: width 0.3s;"></div>
+      </div>
+    </div>
+  `;
+
+  try {
+    const blobs = [];
+    for (let i = 0; i < currentChunks.length; i++) {
+      const response = await fetch(currentChunks[i].downloadUrl);
+      if (!response.ok) throw new Error(`Chunk ${i + 1} download failed (${response.status})`);
+      blobs.push(await response.blob());
+
+      const progress = document.getElementById('chunkDownloadProgress');
+      const bar = document.getElementById('chunkDownloadBar');
+      if (progress) progress.textContent = `${i + 1} / ${currentChunks.length}`;
+      if (bar) bar.style.width = `${((i + 1) / currentChunks.length) * 100}%`;
+    }
+
+    const fullBlob = new Blob(blobs, { type: 'video/webm' });
+    const url = URL.createObjectURL(fullBlob);
+
+    videoLoading.style.display = 'none';
+    videoElement.style.display = 'block';
+    videoElement.src = url;
+    videoElement.load();
+    videoElement.play().catch(e => console.warn('Autoplay blocked:', e.message));
+
+    // Hide prev/next — single combined blob
+    document.getElementById('prevChunkBtn').style.display = 'none';
+    document.getElementById('nextChunkBtn').style.display = 'none';
+    document.getElementById('currentChunkNum').textContent = '1';
+    document.getElementById('totalChunks').textContent = '1 (combined)';
+
+    console.log(`[RawPlay] Concatenated ${blobs.length} chunks into ${(fullBlob.size / 1024 / 1024).toFixed(1)}MB blob`);
+  } catch (error) {
+    console.error('Error downloading chunks:', error);
+    videoLoading.innerHTML = `
+      <div style="text-align: center; color: #f44336;">
+        <div style="font-size: 14px; font-weight: 600;">Download failed</div>
+        <div style="font-size: 12px; color: #aaa; margin-top: 8px;">${error.message}</div>
+        <button onclick="forcePlayRawChunks()" style="margin-top: 12px; background: #2196f3; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+          Retry
+        </button>
+      </div>
+    `;
+  }
 }
 
 // Trigger compilation from single-view player
@@ -1466,11 +1517,9 @@ async function mvInitDevice(sessionId, deviceType) {
     overlay.innerHTML = `
       <div style="font-size:36px;margin-bottom:12px;">🎬</div>
       <div style="font-size:14px;font-weight:600;margin-bottom:8px;">${chunkCount} raw chunks found</div>
-      <div style="font-size:12px;color:#aaa;margin-bottom:16px;">Needs compilation into a single video for smooth playback</div>
-      <button onclick="mvTriggerCompile('${sessionId}', this)" style="background:#ff9800;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;">Compile Now</button>
-      <div style="margin-top:16px;border-top:1px solid #444;padding-top:12px;">
-        <button onclick="mvForcePlayRawChunks('${deviceType}')" style="background:transparent;color:#666;border:1px solid #555;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:11px;">Try playing raw chunks (may crash)</button>
-      </div>
+      <div style="font-size:12px;color:#aaa;margin-bottom:12px;">Needs compilation for seekable playback</div>
+      <button onclick="mvTriggerCompile('${sessionId}', this)" style="background:#ff9800;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;margin-bottom:8px;">Compile Now (server)</button>
+      <button onclick="mvDownloadAndPlay('${deviceType}', this)" style="background:#2196f3;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;">Download &amp; Play</button>
     `;
     box.appendChild(overlay);
     console.log(`[MVP][${deviceType}] Raw chunks — showing compile prompt`);
@@ -1556,27 +1605,62 @@ async function mvTriggerCompile(sessionId, button) {
   }
 }
 
-// Force-play raw chunks in multi-view (escape hatch when compilation isn't available)
-function mvForcePlayRawChunks(deviceType) {
+// Download all raw chunks, concatenate in browser, and play as single video in multi-view
+async function mvDownloadAndPlay(deviceType, button) {
   const cap = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
   const box = document.getElementById(`mv${cap}`);
   const device = mvState.devices[deviceType];
   if (!device || !device.chunks || device.chunks.length === 0) return;
 
-  // Remove the compile overlay
-  const overlay = box.querySelector('.mv-compile-overlay');
-  if (overlay) overlay.remove();
-
-  // Mark as no longer needing compile (so sync doesn't skip it)
-  device.needsCompile = false;
-  device.isCombined = false;
-
   const label = box.querySelector('.mv-label');
-  if (label) label.textContent = `${cap} (${device.chunks.length} chunks — raw)`;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Downloading...';
+    button.style.background = '#6c757d';
+  }
 
-  // Start playing chunks sequentially
-  console.log(`[MVP][${deviceType}] Force-playing ${device.chunks.length} raw chunks`);
-  mvLoadChunk(deviceType, 0);
+  try {
+    const chunks = device.chunks;
+    const blobs = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const response = await fetch(chunks[i].downloadUrl);
+      if (!response.ok) throw new Error(`Chunk ${i + 1} failed (${response.status})`);
+      blobs.push(await response.blob());
+      if (button) button.textContent = `Downloading ${i + 1}/${chunks.length}...`;
+    }
+
+    const fullBlob = new Blob(blobs, { type: 'video/webm' });
+    const url = URL.createObjectURL(fullBlob);
+
+    // Remove the compile overlay
+    const overlay = box.querySelector('.mv-compile-overlay');
+    if (overlay) overlay.remove();
+
+    // Mark as playing
+    device.needsCompile = false;
+    device.isCombined = true; // Treat the concatenated blob like a combined video
+
+    if (label) label.textContent = `${cap} (combined in browser)`;
+
+    // Play the concatenated blob
+    const video = device.video;
+    video.src = url;
+    video.load();
+    video.onloadeddata = () => {
+      box.classList.remove('loading');
+      video.play().catch(e => console.warn(`[MVP][${deviceType}] Autoplay blocked:`, e.message));
+    };
+
+    console.log(`[MVP][${deviceType}] Concatenated ${blobs.length} chunks into ${(fullBlob.size / 1024 / 1024).toFixed(1)}MB blob`);
+  } catch (error) {
+    console.error(`[MVP][${deviceType}] Download & play error:`, error);
+    if (button) {
+      button.textContent = 'Failed — retry';
+      button.style.background = '#f44336';
+      button.disabled = false;
+    }
+    if (label) label.textContent = `${cap} (download failed)`;
+  }
 }
 
 // Main entry point
