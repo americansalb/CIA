@@ -1,65 +1,91 @@
 const { getDrive } = require('../utils/google-auth');
 
+// Helper to list ALL files with pagination
+async function listAllFiles(drive, query, fields) {
+  const allFiles = [];
+  let pageToken = null;
+
+  do {
+    const response = await drive.files.list({
+      q: query,
+      fields: `nextPageToken, files(${fields})`,
+      pageSize: 1000,
+      pageToken: pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+
+    allFiles.push(...(response.data.files || []));
+    pageToken = response.data.nextPageToken;
+  } while (pageToken);
+
+  return allFiles;
+}
+
 module.exports = async (req, res) => {
+  const t0 = Date.now();
+  const log = (msg) => console.log(`[session-chunks ${Date.now() - t0}ms] ${msg}`);
+
   try {
     const { sessionId, deviceType } = req.query;
 
     if (!sessionId || !deviceType) {
-      return res.status(400).json({
-        success: false,
-        message: 'Session ID and device type are required',
-      });
+      return res.status(400).json({ success: false, message: 'Session ID and device type are required' });
     }
+
+    log(`START sessionId=${sessionId} deviceType=${deviceType}`);
 
     const drive = await getDrive();
     const mainFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
-    // Get all student folders
-    const studentFoldersResponse = await drive.files.list({
-      q: `'${mainFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-      fields: 'files(id, name)',
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    });
+    log(`Listing student folders in ${mainFolderId}`);
+    const studentFolders = await listAllFiles(
+      drive,
+      `'${mainFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      'id, name'
+    );
+    log(`Found ${studentFolders.length} student folders`);
 
-    // Search for session folder in all student folders
-    let sessionFolderId = null;
-    for (const studentFolder of studentFoldersResponse.data.files || []) {
-      const sessionFoldersResponse = await drive.files.list({
-        q: `'${studentFolder.id}' in parents and name='${sessionId}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-        fields: 'files(id)',
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
-      });
-
-      if (sessionFoldersResponse.data.files && sessionFoldersResponse.data.files.length > 0) {
-        sessionFolderId = sessionFoldersResponse.data.files[0].id;
-        break;
+    // Search ALL student folders for this session
+    const sessionFolderIds = [];
+    for (const studentFolder of studentFolders) {
+      const sessionFolders = await listAllFiles(
+        drive,
+        `'${studentFolder.id}' in parents and name='${sessionId}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+        'id'
+      );
+      for (const sf of sessionFolders) {
+        sessionFolderIds.push(sf.id);
       }
     }
+    log(`Found ${sessionFolderIds.length} session folder(s)`);
 
-    if (!sessionFolderId) {
-      return res.status(404).json({
-        success: false,
-        message: 'Session not found',
-      });
+    if (sessionFolderIds.length === 0) {
+      return res.status(404).json({ success: false, message: 'Session not found' });
     }
 
-    // First, check for COMBINED or FINAL videos (these take priority)
-    const combinedResponse = await drive.files.list({
-      q: `'${sessionFolderId}' in parents and (name contains 'COMBINED_${deviceType}' or name contains 'FINAL_${deviceType}') and trashed=false`,
-      fields: 'files(id, name, webContentLink, webViewLink, mimeType, createdTime)',
-      orderBy: 'createdTime desc',
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    });
+    // Fetch files from all matching session folders
+    const allFiles = [];
+    for (const folderId of sessionFolderIds) {
+      const files = await listAllFiles(
+        drive,
+        `'${folderId}' in parents and trashed=false`,
+        'id, name, mimeType, createdTime'
+      );
+      allFiles.push(...files);
+    }
+    log(`Found ${allFiles.length} total files`);
 
-    const combinedVideos = combinedResponse.data.files || [];
+    // Look for COMBINED or FINAL videos only
+    const combinedVideos = allFiles.filter(f =>
+      f.name.includes(`COMBINED_${deviceType}`) ||
+      f.name.includes(`_${deviceType}_FINAL_`)
+    );
 
     if (combinedVideos.length > 0) {
-      // Return the most recent combined/final video
+      combinedVideos.sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
       const video = combinedVideos[0];
-      console.log(`[get-session-chunks] Found combined video: ${video.name}`);
+      log(`Found combined/FINAL: ${video.name}`);
       return res.json({
         success: true,
         hasCombinedVideo: true,
@@ -74,67 +100,19 @@ module.exports = async (req, res) => {
       });
     }
 
-    // No combined video, get all chunk files for this session and device
-    const filesResponse = await drive.files.list({
-      q: `'${sessionFolderId}' in parents and name contains '${deviceType}_chunk_' and trashed=false`,
-      fields: 'files(id, name, webContentLink, webViewLink, mimeType, createdTime)',
-      orderBy: 'name',
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    });
-
-    const chunks = filesResponse.data.files || [];
-
-    console.log(`[get-session-chunks] Found ${chunks.length} chunks for session ${sessionId}, device ${deviceType}`);
-
-    if (chunks.length === 0) {
-      console.log(`[get-session-chunks] No chunks found in folder ${sessionFolderId}`);
-      return res.json({
-        success: true,
-        chunks: [],
-      });
-    }
-
-    // Sort chunks by number
-    chunks.sort((a, b) => {
-      const matchA = a.name.match(/_chunk_(\d+)/);
-      const matchB = b.name.match(/_chunk_(\d+)/);
-      if (!matchA || !matchB) {
-        console.warn(`[get-session-chunks] Invalid chunk filename format: ${a.name} or ${b.name}`);
-        return 0;
-      }
-      const numA = parseInt(matchA[1]);
-      const numB = parseInt(matchB[1]);
-      return numA - numB;
-    });
-
-    // Generate download URLs using our proxy endpoint
-    const chunksWithUrls = chunks.map(chunk => {
-      const match = chunk.name.match(/_chunk_(\d+)/);
-      if (!match) {
-        console.warn(`[get-session-chunks] Skipping invalid chunk filename: ${chunk.name}`);
-        return null;
-      }
-      return {
-        fileId: chunk.id,
-        fileName: chunk.name,
-        chunkNumber: parseInt(match[1]),
-        downloadUrl: `/api/stream-chunk?fileId=${chunk.id}`,
-        mimeType: chunk.mimeType,
-        createdTime: chunk.createdTime,
-      };
-    }).filter(chunk => chunk !== null);
+    // No combined video — return empty (user needs to compile first)
+    const chunkCount = allFiles.filter(f => f.name.includes(`${deviceType}_chunk_`)).length;
+    log(`No combined video. ${chunkCount} uncompiled chunks for ${deviceType}.`);
 
     res.json({
       success: true,
       hasCombinedVideo: false,
-      chunks: chunksWithUrls,
+      chunkCount,
+      chunks: [],
     });
   } catch (error) {
+    log(`ERROR: ${error.message}`);
     console.error('Get session chunks error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch chunks',
-    });
+    res.status(500).json({ success: false, message: 'Failed to fetch chunks: ' + error.message });
   }
 };

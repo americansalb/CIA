@@ -143,7 +143,23 @@ function renderCompactTable(attempts) {
     const date = a.date;
     const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
     const isPractice = a.type === 'practice';
-    const hasVideo = !isPractice && a.videos && a.videos.length > 0;
+    // Real videos = FINAL or COMBINED (not chunk placeholders)
+    const hasRealVideo = !isPractice && a.videos && a.videos.some(v => v.fileId !== 'chunks');
+    // Needs compile = has uncompiled chunks
+    const needsCompile = !isPractice && a.chunkCount && Object.keys(a.chunkCount).length > 0;
+    const totalChunks = needsCompile ? Object.values(a.chunkCount).reduce((s, n) => s + n, 0) : 0;
+
+    let actionHtml = '';
+    if (hasRealVideo) {
+      actionHtml += `<button onclick="openMultiView('${a.sessionId}', '${a.email}')" style="background: #667eea; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Watch</button> `;
+      actionHtml += `<button onclick="compileRecording('${a.sessionId}', this, true)" style="background: #6c757d; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 11px;">Recompile</button> `;
+    }
+    if (needsCompile) {
+      actionHtml += `<button id="compile-btn-${a.sessionId}" onclick="compileRecording('${a.sessionId}', this, false)" style="background: #ff9800; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Compile (${totalChunks} chunks)</button>`;
+    }
+    if (!hasRealVideo && !needsCompile && !isPractice) {
+      actionHtml = '<span style="color: #999; font-size: 11px;">No video</span>';
+    }
 
     return `
       <tr style="border-bottom: 1px solid #eee;">
@@ -159,12 +175,7 @@ function renderCompactTable(attempts) {
             : `<span style="background: ${a.status === 'incomplete' ? '#f44336' : '#4caf50'}; color: white; padding: 2px 8px; border-radius: 10px; font-size: 11px;">${a.status === 'incomplete' ? 'Incomplete' : 'Complete'}</span>`
           }
         </td>
-        <td style="padding: 8px 12px;">
-          ${hasVideo
-            ? `<button onclick="openMultiView('${a.sessionId}', '${a.email}')" style="background: #667eea; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Watch</button>`
-            : '<span style="color: #999; font-size: 11px;">No video</span>'
-          }
-        </td>
+        <td style="padding: 8px 12px;">${actionHtml}</td>
       </tr>
     `;
   }).join('');
@@ -442,6 +453,7 @@ async function submitGrade(event, sessionId) {
         recording.notes = notes;
         recording.gradedBy = adminEmail;
         recording.gradedAt = new Date().toISOString();
+        updateFilterCounts();
       }
 
       setTimeout(() => {
@@ -919,168 +931,262 @@ function closeLiveStream() {
 window.switchTab = switchTab;
 
 // ====================
+// COMPILE RECORDING
+// ====================
+
+async function compileRecording(sessionId, button, force) {
+  console.log(`[Compile] Starting compile for session: ${sessionId}, force: ${!!force}`);
+  button.disabled = true;
+  button.textContent = force ? 'Recompiling...' : 'Starting...';
+  button.style.background = '#6c757d';
+
+  try {
+    const response = await fetch('/api/compile-recording', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, force: !!force }),
+    });
+    const result = await response.json();
+
+    if (!result.success) {
+      throw new Error(result.message || 'Compile request failed');
+    }
+
+    if (result.status === 'done') {
+      button.textContent = 'Compiled!';
+      button.style.background = '#4caf50';
+      console.log('[Compile] Already compiled');
+      setTimeout(() => loadRecordings(), 2000);
+      return;
+    }
+
+    // Start polling for status
+    button.textContent = 'Compiling...';
+    button.style.background = '#2196f3';
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusResp = await fetch(`/api/compile-status?sessionId=${encodeURIComponent(sessionId)}`);
+        const statusResult = await statusResp.json();
+        console.log(`[Compile] Poll status:`, statusResult);
+
+        if (!statusResult.success) return;
+
+        // Update button with progress
+        const devices = statusResult.devices || {};
+        const parts = [];
+        for (const [dt, info] of Object.entries(devices)) {
+          if (info.status === 'compiling') parts.push(`${dt}: compiling ${info.chunks} chunks`);
+          else if (info.status === 'queued') parts.push(`${dt}: queued (${info.chunks})`);
+          else if (info.status === 'done') parts.push(`${dt}: done`);
+          else if (info.status === 'error') parts.push(`${dt}: ERROR ${info.error || ''}`);
+        }
+        button.textContent = parts.length > 0 ? parts.join(' | ') : 'Compiling...';
+
+        if (statusResult.status === 'done' || statusResult.status === 'error') {
+          clearInterval(pollInterval);
+          if (statusResult.status === 'done') {
+            button.textContent = 'Compiled!';
+            button.style.background = '#4caf50';
+            console.log('[Compile] All done — refreshing recordings');
+            setTimeout(() => loadRecordings(), 2000);
+          } else {
+            button.textContent = 'Error — click to retry';
+            button.style.background = '#f44336';
+            button.disabled = false;
+            button.onclick = () => compileRecording(sessionId, button);
+          }
+        }
+      } catch (pollErr) {
+        console.error('[Compile] Poll error:', pollErr);
+      }
+    }, 5000); // Poll every 5 seconds
+
+  } catch (error) {
+    console.error('[Compile] Error:', error);
+    button.textContent = 'Failed — click to retry';
+    button.style.background = '#f44336';
+    button.disabled = false;
+    button.onclick = () => compileRecording(sessionId, button);
+  }
+}
+
+// ====================
 // MULTI-VIEW VIDEO PLAYER
 // ====================
 
-let mv = {
-  videos: {},      // deviceType -> video element
-  chunks: {},      // deviceType -> chunk array
-  chunkIdx: {},    // deviceType -> current chunk index
-  startTimes: {},  // deviceType -> epoch ms of first chunk
-  spotlight: 'main'
+let multiViewData = {
+  sessionId: null,
+  email: null,
+  videos: { main: null, proctor: null, screen: null },
+  currentSpotlight: 'main'
 };
 
+function mvLog(deviceType, msg) {
+  console.log(`[MultiView][${deviceType}] ${msg}`);
+}
+
 async function openMultiView(sessionId, email) {
-  mv = { videos: {}, chunks: {}, chunkIdx: {}, startTimes: {}, spotlight: 'main' };
+  console.log(`[MultiView] Opening for session=${sessionId} email=${email}`);
+  multiViewData.sessionId = sessionId;
+  multiViewData.email = email;
+  multiViewData.currentSpotlight = 'main';
 
   const modal = document.getElementById('multiViewModal');
-  document.getElementById('multiViewTitle').textContent = `Multi-View: ${email}`;
-  modal.classList.add('active');
-
+  const title = document.getElementById('multiViewTitle');
   const grid = document.getElementById('multiViewGrid');
+
+  title.textContent = `Multi-View: ${email}`;
+  modal.classList.add('active');
   grid.className = '';
 
-  // Reset all boxes to loading
+  // Show loading state
   ['Main', 'Proctor', 'Screen'].forEach(type => {
     const box = document.getElementById(`mv${type}`);
     box.classList.add('loading');
     box.classList.remove('spotlight');
     const label = box.querySelector('.mv-label');
-    if (label) label.textContent = type;
+    if (label) label.textContent = `${type} Camera - Loading...`;
   });
 
-  // Fetch all device chunks in parallel
-  const devices = ['main', 'proctor', 'screen'];
-  await Promise.all(devices.map(async (dev) => {
-    const capDev = dev.charAt(0).toUpperCase() + dev.slice(1);
-    const box = document.getElementById(`mv${capDev}`);
-    const video = document.getElementById(`mv${capDev}Video`);
+  // Fetch all device types in parallel — only combined/FINAL videos play
+  const deviceTypes = ['main', 'proctor', 'screen'];
+  const fetches = deviceTypes.map(async (deviceType) => {
+    const capType = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
+    const box = document.getElementById(`mv${capType}`);
+    const video = document.getElementById(`mv${capType}Video`);
     const label = box.querySelector('.mv-label');
 
     try {
-      const resp = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(dev)}`);
-      const data = await resp.json();
+      mvLog(deviceType, `Fetching video for session=${sessionId}`);
+      const response = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
+      const result = await response.json();
 
-      if (!data.success || !data.chunks || data.chunks.length === 0) {
+      mvLog(deviceType, `hasCombined=${result.hasCombinedVideo}, videos=${result.chunks ? result.chunks.length : 0}, uncompiled=${result.chunkCount || 0}`);
+
+      if (result.success && result.hasCombinedVideo && result.chunks && result.chunks.length > 0) {
+        // Play the combined/FINAL video
+        const videoData = result.chunks[0];
+        mvLog(deviceType, `Playing combined video: ${videoData.fileName}`);
+        video.src = videoData.downloadUrl;
+        video.load();
+        multiViewData.videos[deviceType] = video;
+
+        video.onloadeddata = () => {
+          box.classList.remove('loading');
+          if (label) label.textContent = `${capType} Camera`;
+          video.play().catch(e => mvLog(deviceType, `Autoplay blocked: ${e.message}`));
+        };
+        video.onerror = () => {
+          box.classList.remove('loading');
+          if (label) label.textContent = `${capType} Camera (Load error)`;
+          mvLog(deviceType, `Video load error: ${video.error ? video.error.message : 'unknown'}`);
+        };
+      } else if (result.chunkCount > 0) {
+        // Has chunks but not compiled yet
         box.classList.remove('loading');
-        if (label) label.textContent = `${capDev} (No recording)`;
-        return;
+        video.src = '';
+        if (label) label.textContent = `${capType} Camera (Not compiled — ${result.chunkCount} chunks)`;
+        mvLog(deviceType, `Not compiled: ${result.chunkCount} chunks need compiling`);
+      } else {
+        box.classList.remove('loading');
+        video.src = '';
+        if (label) label.textContent = `${capType} Camera (No recording)`;
+        mvLog(deviceType, 'No recording found');
       }
-
-      mv.videos[dev] = video;
-      mv.chunks[dev] = data.chunks;
-      mv.chunkIdx[dev] = 0;
-
-      // Store first chunk start time for sync
-      if (data.chunks[0].createdTime) {
-        mv.startTimes[dev] = new Date(data.chunks[0].createdTime).getTime();
-      }
-
-      // Label
-      if (label) {
-        label.textContent = data.chunks[0].isCombined
-          ? `${capDev} (Combined)`
-          : `${capDev} (${data.chunks.length} chunk${data.chunks.length > 1 ? 's' : ''})`;
-      }
-
-      // Load first chunk and auto-chain subsequent chunks
-      video.src = data.chunks[0].downloadUrl;
-      video.load();
-      video.onloadeddata = () => box.classList.remove('loading');
-      video.onerror = () => { box.classList.remove('loading'); mvNextChunk(dev); };
-      video.onended = () => mvNextChunk(dev);
-    } catch (err) {
-      console.error(`Error loading ${dev}:`, err);
+    } catch (error) {
+      mvLog(deviceType, `Fetch ERROR: ${error.message}`);
       box.classList.remove('loading');
+      if (label) label.textContent = `${capType} Camera (Error)`;
     }
-  }));
+  });
 
-  // Log actual start time offsets for debugging
-  const starts = Object.entries(mv.startTimes);
-  if (starts.length > 1) {
-    const earliest = Math.min(...starts.map(([, t]) => t));
-    starts.forEach(([dev, t]) => console.log(`[Sync] ${dev} started ${((t - earliest) / 1000).toFixed(1)}s after earliest`));
-  }
-
+  await Promise.all(fetches);
+  console.log('[MultiView] All device types loaded');
   spotlightVideo('main');
 }
 
-function mvNextChunk(dev) {
-  const video = mv.videos[dev];
-  const chunks = mv.chunks[dev];
-  const idx = mv.chunkIdx[dev];
-  if (!video || !chunks || idx >= chunks.length - 1) return;
-
-  mv.chunkIdx[dev] = idx + 1;
-  video.src = chunks[idx + 1].downloadUrl;
-  video.load();
-  video.play().catch(() => {});
-}
-
-function spotlightVideo(dev) {
+function spotlightVideo(deviceType) {
   const grid = document.getElementById('multiViewGrid');
-  grid.className = `spotlight-${dev}`;
-  document.querySelectorAll('.mv-video-box').forEach(b => b.classList.remove('spotlight'));
-  const capDev = dev.charAt(0).toUpperCase() + dev.slice(1);
-  document.getElementById(`mv${capDev}`).classList.add('spotlight');
-  mv.spotlight = dev;
-}
 
-function playAllVideos() {
-  Object.values(mv.videos).forEach(v => { if (v && v.src) v.play().catch(() => {}); });
-}
+  // Remove all spotlight classes
+  grid.className = '';
+  document.querySelectorAll('.mv-video-box').forEach(box => box.classList.remove('spotlight'));
 
-function pauseAllVideos() {
-  Object.values(mv.videos).forEach(v => { if (v) v.pause(); });
+  // Add spotlight class
+  grid.classList.add(`spotlight-${deviceType}`);
+  const boxId = `mv${deviceType.charAt(0).toUpperCase() + deviceType.slice(1)}`;
+  document.getElementById(boxId).classList.add('spotlight');
+
+  multiViewData.currentSpotlight = deviceType;
 }
 
 function syncAllVideos() {
-  // Sync based on actual recording start times (createdTime of first chunk)
-  const refDev = mv.spotlight;
-  const refVideo = mv.videos[refDev];
-  if (!refVideo) return;
+  // Get the current time of the spotlight video
+  const spotlightVideo = multiViewData.videos[multiViewData.currentSpotlight];
+  if (!spotlightVideo) return;
 
-  const refStart = mv.startTimes[refDev];
-  const refTime = refVideo.currentTime; // current playback position in spotlight
+  const currentTime = spotlightVideo.currentTime;
 
-  Object.entries(mv.videos).forEach(([dev, video]) => {
-    if (dev === refDev || !video) return;
-    const devStart = mv.startTimes[dev];
+  // Sync all other videos to this time
+  Object.values(multiViewData.videos).forEach(video => {
+    if (video && video !== spotlightVideo) {
+      video.currentTime = currentTime;
+    }
+  });
 
-    if (refStart && devStart) {
-      // Real timestamp sync: offset = how much later this device started
-      const offsetSecs = (devStart - refStart) / 1000;
-      const target = refTime - offsetSecs;
-      if (target >= 0) {
-        video.currentTime = target;
-      } else {
-        video.currentTime = 0;
-        video.pause();
-      }
-    } else {
-      video.currentTime = refTime;
+  console.log(`Synced all videos to ${currentTime.toFixed(1)}s`);
+}
+
+function playAllVideos() {
+  Object.values(multiViewData.videos).forEach(video => {
+    if (video) {
+      video.play().catch(err => console.log('Play failed:', err));
+    }
+  });
+}
+
+function pauseAllVideos() {
+  Object.values(multiViewData.videos).forEach(video => {
+    if (video) {
+      video.pause();
     }
   });
 }
 
 function closeMultiView() {
-  document.getElementById('multiViewModal').classList.remove('active');
-  Object.values(mv.videos).forEach(v => { if (v) { v.pause(); v.src = ''; v.onended = null; } });
-  mv = { videos: {}, chunks: {}, chunkIdx: {}, startTimes: {}, spotlight: 'main' };
+  const modal = document.getElementById('multiViewModal');
+  modal.classList.remove('active');
+
+  // Stop all videos and clear event handlers
+  Object.values(multiViewData.videos).forEach(video => {
+    if (video) {
+      video.pause();
+      video.onloadeddata = null;
+      video.onerror = null;
+      video.src = '';
+    }
+  });
+
+  multiViewData = {
+    sessionId: null,
+    email: null,
+    videos: { main: null, proctor: null, screen: null },
+    currentSpotlight: 'main'
+  };
 }
 
-// Time display update
+// Update time display
 setInterval(() => {
   const modal = document.getElementById('multiViewModal');
-  if (!modal.classList.contains('active')) return;
-  const video = mv.videos[mv.spotlight];
-  if (!video || isNaN(video.currentTime)) return;
-  const t = video.currentTime;
-  const mins = Math.floor(t / 60);
-  const secs = Math.floor(t % 60);
-  const chunks = mv.chunks[mv.spotlight];
-  const info = chunks && chunks.length > 1 ? ` [${mv.chunkIdx[mv.spotlight] + 1}/${chunks.length}]` : '';
-  document.getElementById('mvTimeDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}${info}`;
+  if (modal.classList.contains('active')) {
+    const video = multiViewData.videos[multiViewData.currentSpotlight];
+    if (video && !isNaN(video.currentTime)) {
+      const mins = Math.floor(video.currentTime / 60);
+      const secs = Math.floor(video.currentTime % 60);
+      document.getElementById('mvTimeDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+  }
 }, 500);
 
 // Verification log at end of script
