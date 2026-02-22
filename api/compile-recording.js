@@ -56,9 +56,9 @@ function cleanupStaleTempFiles() {
 cleanupStaleTempFiles();
 setInterval(cleanupStaleTempFiles, 30 * 60 * 1000);
 
-// Timeout scales with chunk count: 1 minute per chunk + 5 minute buffer, minimum 10 minutes
+// Timeout scales with chunk count: 30s per chunk + 2 minute buffer, minimum 5 minutes, max 15 minutes
 function getCompileTimeout(chunkCount) {
-  return Math.max(10 * 60 * 1000, (chunkCount * 60 * 1000) + (5 * 60 * 1000));
+  return Math.min(15 * 60 * 1000, Math.max(5 * 60 * 1000, (chunkCount * 30 * 1000) + (2 * 60 * 1000)));
 }
 
 async function processQueue() {

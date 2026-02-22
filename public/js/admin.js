@@ -1198,6 +1198,16 @@ window.switchTab = switchTab;
 // COMPILE RECORDING
 // ====================
 
+// Client-side poll timeout: stop polling after 5 minutes
+const COMPILE_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+const COMPILE_POLL_INTERVAL_MS = 5000;
+
+function _fmtElapsed(ms) {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  return m > 0 ? `${m}m ${s % 60}s` : `${s}s`;
+}
+
 async function compileRecording(sessionId, button, force) {
   console.log(`[Compile] Starting compile for session: ${sessionId}, force: ${!!force}`);
   button.disabled = true;
@@ -1224,19 +1234,51 @@ async function compileRecording(sessionId, button, force) {
       return;
     }
 
-    // Start polling for status
+    // Start polling for status with timeout
     button.textContent = 'Compiling...';
     button.style.background = '#2196f3';
+    const pollStarted = Date.now();
+    let notStartedCount = 0;
 
     const pollInterval = setInterval(async () => {
       try {
+        const elapsed = Date.now() - pollStarted;
+
+        // Client-side timeout: give up polling after 5 minutes
+        if (elapsed > COMPILE_POLL_TIMEOUT_MS) {
+          clearInterval(pollInterval);
+          console.warn(`[Compile] Poll timeout after ${_fmtElapsed(elapsed)}`);
+          button.textContent = 'Timed out — click to retry';
+          button.style.background = '#f44336';
+          button.disabled = false;
+          button.onclick = () => compileRecording(sessionId, button, force);
+          return;
+        }
+
         const statusResp = await fetch(`/api/compile-status?sessionId=${encodeURIComponent(sessionId)}`);
         const statusResult = await statusResp.json();
-        console.log(`[Compile] Poll status:`, statusResult);
+        console.log(`[Compile] Poll status (${_fmtElapsed(elapsed)}):`, statusResult);
 
         if (!statusResult.success) return;
 
-        // Update button with progress
+        // Server restarted — status lost
+        if (statusResult.status === 'not_started') {
+          notStartedCount++;
+          if (notStartedCount >= 3) {
+            clearInterval(pollInterval);
+            console.warn('[Compile] Status lost (server restart). Stopping poll.');
+            button.textContent = 'Server restarted — click to retry';
+            button.style.background = '#ff9800';
+            button.disabled = false;
+            button.onclick = () => compileRecording(sessionId, button, force);
+            return;
+          }
+          button.textContent = `Waiting for server... (${_fmtElapsed(elapsed)})`;
+          return;
+        }
+        notStartedCount = 0;
+
+        // Update button with progress + elapsed time
         const devices = statusResult.devices || {};
         const parts = [];
         for (const [dt, info] of Object.entries(devices)) {
@@ -1245,7 +1287,8 @@ async function compileRecording(sessionId, button, force) {
           else if (info.status === 'done') parts.push(`${dt}: done`);
           else if (info.status === 'error') parts.push(`${dt}: ERROR ${info.error || ''}`);
         }
-        button.textContent = parts.length > 0 ? parts.join(' | ') : 'Compiling...';
+        const progressText = parts.length > 0 ? parts.join(' | ') : 'Compiling...';
+        button.textContent = `${progressText} (${_fmtElapsed(elapsed)})`;
 
         if (statusResult.status === 'done' || statusResult.status === 'error') {
           clearInterval(pollInterval);
@@ -1264,7 +1307,7 @@ async function compileRecording(sessionId, button, force) {
       } catch (pollErr) {
         console.error('[Compile] Poll error:', pollErr);
       }
-    }, 5000); // Poll every 5 seconds
+    }, COMPILE_POLL_INTERVAL_MS);
 
   } catch (error) {
     console.error('[Compile] Error:', error);
@@ -1539,12 +1582,41 @@ async function mvTriggerCompile(sessionId, button) {
       return;
     }
 
-    // Poll for completion
+    // Poll for completion with timeout
     button.textContent = 'Compiling... (this may take a few minutes)';
+    const mvPollStart = Date.now();
+    let mvNotStartedCount = 0;
     const pollId = setInterval(async () => {
       try {
+        const elapsed = Date.now() - mvPollStart;
+
+        if (elapsed > COMPILE_POLL_TIMEOUT_MS) {
+          clearInterval(pollId);
+          console.warn(`[MVP] Compile poll timeout after ${_fmtElapsed(elapsed)}`);
+          button.textContent = 'Timed out — try Download & Play';
+          button.style.background = '#f44336';
+          button.disabled = false;
+          button.onclick = () => mvTriggerCompile(sessionId, button);
+          return;
+        }
+
         const statusResp = await fetch(`/api/compile-status?sessionId=${encodeURIComponent(sessionId)}`);
         const statusData = await statusResp.json();
+
+        if (statusData.status === 'not_started') {
+          mvNotStartedCount++;
+          if (mvNotStartedCount >= 3) {
+            clearInterval(pollId);
+            button.textContent = 'Server restarted — retry or Download & Play';
+            button.style.background = '#ff9800';
+            button.disabled = false;
+            button.onclick = () => mvTriggerCompile(sessionId, button);
+            return;
+          }
+          button.textContent = `Waiting for server... (${_fmtElapsed(elapsed)})`;
+          return;
+        }
+        mvNotStartedCount = 0;
 
         if (statusData.status === 'done') {
           clearInterval(pollId);
@@ -1562,7 +1634,7 @@ async function mvTriggerCompile(sessionId, button) {
           button.disabled = false;
           button.onclick = () => mvTriggerCompile(sessionId, button);
         } else {
-          // Show progress
+          // Show progress with elapsed time
           const devices = statusData.devices || {};
           const parts = Object.entries(devices).map(([dt, info]) => {
             if (info.status === 'compiling') return `${dt}: compiling`;
@@ -1570,12 +1642,12 @@ async function mvTriggerCompile(sessionId, button) {
             if (info.status === 'queued') return `${dt}: queued`;
             return `${dt}: ${info.status}`;
           });
-          button.textContent = parts.join(' | ') || 'Compiling...';
+          button.textContent = (parts.join(' | ') || 'Compiling...') + ` (${_fmtElapsed(elapsed)})`;
         }
       } catch (e) {
         console.error('[MVP] Poll error:', e);
       }
-    }, 5000);
+    }, COMPILE_POLL_INTERVAL_MS);
   } catch (err) {
     console.error('[MVP] Compile trigger error:', err);
     button.textContent = 'Failed — click to retry';
@@ -1613,10 +1685,40 @@ async function mvForceRecompile(sessionId, button) {
     }
 
     button.textContent = 'Recompiling... (may take several minutes)';
+    const frPollStart = Date.now();
+    let frNotStartedCount = 0;
     const pollId = setInterval(async () => {
       try {
+        const elapsed = Date.now() - frPollStart;
+
+        if (elapsed > COMPILE_POLL_TIMEOUT_MS) {
+          clearInterval(pollId);
+          console.warn(`[MVP] Force-recompile poll timeout after ${_fmtElapsed(elapsed)}`);
+          button.textContent = 'Timed out — try Download & Play';
+          button.style.background = '#f44336';
+          button.disabled = false;
+          button.onclick = () => mvForceRecompile(sessionId, button);
+          return;
+        }
+
         const sr = await fetch('/api/compile-status?sessionId=' + encodeURIComponent(sessionId));
         const sd = await sr.json();
+
+        if (sd.status === 'not_started') {
+          frNotStartedCount++;
+          if (frNotStartedCount >= 3) {
+            clearInterval(pollId);
+            button.textContent = 'Server restarted — retry or Download & Play';
+            button.style.background = '#ff9800';
+            button.disabled = false;
+            button.onclick = () => mvForceRecompile(sessionId, button);
+            return;
+          }
+          button.textContent = `Waiting for server... (${_fmtElapsed(elapsed)})`;
+          return;
+        }
+        frNotStartedCount = 0;
+
         if (sd.status === 'done') {
           clearInterval(pollId);
           button.textContent = 'Done! Reopening...';
@@ -1633,13 +1735,13 @@ async function mvForceRecompile(sessionId, button) {
           button.disabled = false;
           button.onclick = () => mvForceRecompile(sessionId, button);
         } else {
-          // Show per-device progress
+          // Show per-device progress with elapsed
           const devices = sd.devices || {};
           const parts = Object.entries(devices).map(([dt, info]) => `${dt}: ${info.status}`);
-          if (parts.length) button.textContent = parts.join(' | ');
+          button.textContent = (parts.length ? parts.join(' | ') : 'Recompiling...') + ` (${_fmtElapsed(elapsed)})`;
         }
       } catch (e) { console.error('[MVP] Poll error:', e); }
-    }, 5000);
+    }, COMPILE_POLL_INTERVAL_MS);
   } catch (err) {
     button.textContent = 'Failed — click to retry';
     button.style.background = '#f44336';
