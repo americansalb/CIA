@@ -77,9 +77,11 @@ module.exports = async (req, res) => {
     log(`Found ${allFiles.length} total files`);
 
     // Look for COMBINED or FINAL videos only
+    // FINAL videos use abbreviated device type (m/p/s), COMBINED uses full name
+    const deviceAbbrev = deviceType[0]; // main->m, proctor->p, screen->s
     const combinedVideos = allFiles.filter(f =>
       f.name.includes(`COMBINED_${deviceType}`) ||
-      f.name.includes(`_${deviceType}_FINAL_`)
+      f.name.includes(`_${deviceAbbrev}_FINAL_`)
     );
 
     if (combinedVideos.length > 0) {
