@@ -869,6 +869,14 @@
               <div id="chunkProgress">Chunk <span id="currentChunkNum">0</span> of <span id="totalChunks">0</span></div>
               <div style="font-size: 12px; color: #aaa; margin-top: 5px;">Click a chunk on the right to jump to it</div>
             </div>
+            <select id="playbackSpeed" onchange="setPlaybackSpeed(this.value)" style="background: #2a2a2a; color: white; border: 1px solid #555; padding: 8px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;">
+              <option value="0.5">0.5x</option>
+              <option value="0.75">0.75x</option>
+              <option value="1" selected>1x</option>
+              <option value="1.25">1.25x</option>
+              <option value="1.5">1.5x</option>
+              <option value="2">2x</option>
+            </select>
           </div>
         </div>
         <div class="chunk-list">
@@ -911,19 +919,59 @@
             <div class="mv-loading">Loading...</div>
           </div>
         </div>
-        <!-- Sync Controls -->
-        <div style="background: #1a1a1a; padding: 15px; border-radius: 8px; margin-top: 10px; display: flex; gap: 15px; align-items: center;">
-          <button onclick="syncAllVideos()" style="background: #667eea; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
-            🔄 Sync All
-          </button>
-          <button onclick="playAllVideos()" style="background: #4caf50; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
-            ▶️ Play All
-          </button>
-          <button onclick="pauseAllVideos()" style="background: #f44336; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
-            ⏸️ Pause All
-          </button>
-          <div style="flex: 1;"></div>
-          <span id="mvTimeDisplay" style="color: #aaa; font-size: 14px;">--:--</span>
+        <!-- Unified Timeline & Controls -->
+        <div id="mvControlBar" style="background: #1a1a1a; padding: 12px 15px; border-radius: 8px; margin-top: 10px;">
+          <!-- Transport Controls Row -->
+          <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 10px;">
+            <button id="mvPlayPauseBtn" onclick="mvTogglePlayPause()" style="background: #667eea; color: white; border: none; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;">
+              ▶
+            </button>
+            <span id="mvTimeDisplay" style="color: #fff; font-size: 14px; font-weight: 600; min-width: 120px;">00:00 / --:--</span>
+            <button onclick="syncAllVideos()" style="background: #333; color: #aaa; border: 1px solid #444; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;" title="Sync all cameras to the spotlighted video">
+              Sync
+            </button>
+            <div style="flex: 1;"></div>
+            <select id="mvPlaybackSpeed" onchange="mvSetSpeed(this.value)" style="background: #333; color: #ccc; border: 1px solid #444; padding: 5px 8px; border-radius: 4px; font-size: 12px; cursor: pointer;">
+              <option value="0.5">0.5x</option>
+              <option value="0.75">0.75x</option>
+              <option value="1" selected>1.0x</option>
+              <option value="1.25">1.25x</option>
+              <option value="1.5">1.5x</option>
+              <option value="2">2.0x</option>
+            </select>
+          </div>
+          <!-- Timeline Bar -->
+          <div id="mvTimeline" style="position: relative; height: 28px; background: #2a2a2a; border-radius: 4px; cursor: pointer; user-select: none;" onclick="mvSeekFromClick(event)" onmousemove="mvShowTooltip(event)" onmouseleave="mvHideTooltip()">
+            <!-- Progress fill -->
+            <div id="mvProgressFill" style="position: absolute; top: 0; left: 0; height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); border-radius: 4px 0 0 4px; width: 0%; transition: width 0.3s linear; pointer-events: none;"></div>
+            <!-- Chunk boundary markers (injected by JS) -->
+            <div id="mvChunkMarkers" style="position: absolute; top: 0; left: 0; right: 0; height: 100%; pointer-events: none;"></div>
+            <!-- Playhead -->
+            <div id="mvPlayhead" style="position: absolute; top: -2px; width: 4px; height: 32px; background: #fff; border-radius: 2px; box-shadow: 0 0 6px rgba(255,255,255,0.5); pointer-events: none; left: 0%;"></div>
+            <!-- Hover tooltip -->
+            <div id="mvTooltip" style="display: none; position: absolute; bottom: 34px; transform: translateX(-50%); background: #000; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 10;"></div>
+          </div>
+          <!-- Per-device progress bars -->
+          <div id="mvDeviceBars" style="margin-top: 6px; display: flex; flex-direction: column; gap: 2px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="color: #667eea; font-size: 10px; width: 50px; text-align: right;">Main</span>
+              <div style="flex: 1; height: 3px; background: #2a2a2a; border-radius: 2px; overflow: hidden;">
+                <div id="mvBarMain" style="height: 100%; background: #667eea; width: 0%; transition: width 0.3s linear;"></div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="color: #4caf50; font-size: 10px; width: 50px; text-align: right;">Proctor</span>
+              <div style="flex: 1; height: 3px; background: #2a2a2a; border-radius: 2px; overflow: hidden;">
+                <div id="mvBarProctor" style="height: 100%; background: #4caf50; width: 0%; transition: width 0.3s linear;"></div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="color: #ff9800; font-size: 10px; width: 50px; text-align: right;">Screen</span>
+              <div style="flex: 1; height: 3px; background: #2a2a2a; border-radius: 2px; overflow: hidden;">
+                <div id="mvBarScreen" style="height: 100%; background: #ff9800; width: 0%; transition: width 0.3s linear;"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

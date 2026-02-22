@@ -59,6 +59,7 @@ app.get('/proctor', (req, res) => {
 
 // Socket.io for live monitoring and WebRTC signaling
 const { setSession, getSession, hasSession, deleteSession, getAllSessions, updateSession } = require('./utils/redis-client');
+const { triggerCompile } = require('./api/compile-recording');
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
@@ -157,9 +158,20 @@ io.on('connection', (socket) => {
 
     // Remove from active sessions if student
     if (socket.role === 'student' && socket.sessionId) {
-      await deleteSession(socket.sessionId);
+      const sessionId = socket.sessionId;
+
+      await deleteSession(sessionId);
       const sessions = await getAllSessions();
       io.emit('active-sessions', sessions);
+
+      // Auto-compile: trigger compilation through the serial queue after a delay
+      // to allow any in-flight chunk uploads to complete
+      setTimeout(() => {
+        console.log(`[auto-compile] Student disconnected, triggering compilation for ${sessionId}`);
+        triggerCompile(sessionId).catch(err => {
+          console.error('[auto-compile] Failed:', err.message);
+        });
+      }, 10000); // 10s delay for last chunks to finish uploading
     }
   });
 });

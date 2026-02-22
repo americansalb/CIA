@@ -87,6 +87,9 @@ module.exports = async (req, res) => {
         queueConversion(uploadResult.fileId, sessionFolderId, fileName);
       }
 
+      // Note: Auto-compilation is triggered on student disconnect (index.js)
+      // using the serial compile queue. No need to trigger here.
+
       res.json({
         success: true,
         message: 'Final video uploaded successfully',
