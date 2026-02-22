@@ -77,9 +77,11 @@ module.exports = async (req, res) => {
     log(`Found ${allFiles.length} total files`);
 
     // Look for COMBINED or FINAL videos only
+    // FINAL videos use abbreviated device type (m/p/s), COMBINED uses full name
+    const deviceAbbrev = deviceType[0]; // main->m, proctor->p, screen->s
     const combinedVideos = allFiles.filter(f =>
       f.name.includes(`COMBINED_${deviceType}`) ||
-      f.name.includes(`_${deviceType}_FINAL_`)
+      f.name.includes(`_${deviceAbbrev}_FINAL_`)
     );
 
     if (combinedVideos.length > 0) {
@@ -89,25 +91,51 @@ module.exports = async (req, res) => {
       return res.json({
         success: true,
         hasCombinedVideo: true,
+        createdTime: video.createdTime,
         chunks: [{
           fileId: video.id,
           fileName: video.name,
           chunkNumber: 0,
           downloadUrl: `/api/stream-chunk?fileId=${video.id}`,
           mimeType: video.mimeType,
+          createdTime: video.createdTime,
           isCombined: true,
         }],
       });
     }
 
-    // No combined video — return empty (user needs to compile first)
-    const chunkCount = allFiles.filter(f => f.name.includes(`${deviceType}_chunk_`)).length;
-    log(`No combined video. ${chunkCount} uncompiled chunks for ${deviceType}.`);
+    // No combined video — return raw chunks for sequential playback
+    const rawChunks = allFiles
+      .filter(f => f.name.includes(`${deviceType}_chunk_`))
+      .sort((a, b) => {
+        const numA = parseInt(a.name.match(/chunk_(\d+)/)?.[1] || '0');
+        const numB = parseInt(b.name.match(/chunk_(\d+)/)?.[1] || '0');
+        return numA - numB;
+      });
 
+    if (rawChunks.length > 0) {
+      log(`Returning ${rawChunks.length} raw chunks for sequential playback`);
+      return res.json({
+        success: true,
+        hasCombinedVideo: false,
+        createdTime: rawChunks[0].createdTime,
+        chunks: rawChunks.map((f, i) => ({
+          fileId: f.id,
+          fileName: f.name,
+          chunkNumber: i,
+          downloadUrl: `/api/stream-chunk?fileId=${f.id}`,
+          mimeType: f.mimeType,
+          createdTime: f.createdTime,
+          isCombined: false,
+        })),
+      });
+    }
+
+    log(`No video found for ${deviceType}`);
     res.json({
       success: true,
       hasCombinedVideo: false,
-      chunkCount,
+      chunkCount: 0,
       chunks: [],
     });
   } catch (error) {

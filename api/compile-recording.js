@@ -150,8 +150,10 @@ async function startCompile(req, res) {
       const existingCombined = allFiles.filter(f =>
         f.name.includes(`COMBINED_${deviceType}`)
       );
+      // FINAL videos use abbreviated device type (m/p/s)
+      const deviceAbbrev = deviceType[0];
       const hasFinal = allFiles.some(f =>
-        f.name.includes(`_${deviceType}_FINAL_`)
+        f.name.includes(`_${deviceAbbrev}_FINAL_`)
       );
 
       if (force && existingCombined.length > 0) {
