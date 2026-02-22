@@ -1,5 +1,6 @@
-// Admin panel script
-console.log('[Admin] admin.js script loaded at', new Date().toISOString());
+// Admin panel script — v2.0.0 (video-player-overhaul)
+const ADMIN_JS_VERSION = '2.0.0';
+console.log(`[Admin] admin.js v${ADMIN_JS_VERSION} loaded at`, new Date().toISOString());
 let adminEmail = null;
 let allRecordings = [];
 let practiceAttempts = [];
@@ -1387,8 +1388,56 @@ async function mvInitDevice(sessionId, deviceType) {
       };
       video.onerror = () => {
         box.classList.remove('loading');
-        if (label) label.textContent = `${cap} (Playback error)`;
-        console.error(`[MVP][${deviceType}] Failed to load combined video`);
+        console.error(`[MVP][${deviceType}] Combined video failed to load — offering recompile`);
+        if (label) label.textContent = `${cap} (Playback error — recompile recommended)`;
+        // Show recompile overlay so user can recover
+        const overlay = document.createElement('div');
+        overlay.className = 'mv-compile-overlay';
+        overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);z-index:5;color:white;text-align:center;padding:20px;';
+        overlay.innerHTML = `
+          <div style="font-size:36px;margin-bottom:12px;">⚠️</div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:8px;">Combined video failed to play</div>
+          <div style="font-size:12px;color:#aaa;margin-bottom:16px;">The compiled video may be corrupted. Try recompiling.</div>
+          <button onclick="mvTriggerCompile('${sessionId}', this)" style="background:#ff9800;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;">Recompile (force)</button>
+        `;
+        // Override to use force=true for recompile
+        overlay.querySelector('button').onclick = async function() {
+          this.disabled = true;
+          this.textContent = 'Recompiling...';
+          this.style.background = '#6c757d';
+          try {
+            const response = await fetch('/api/compile-recording', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId, force: true }),
+            });
+            const result = await response.json();
+            if (!result.success) throw new Error(result.message);
+            this.textContent = 'Recompiling... (this may take a few minutes)';
+            const pollId = setInterval(async () => {
+              try {
+                const sr = await fetch('/api/compile-status?sessionId=' + encodeURIComponent(sessionId));
+                const sd = await sr.json();
+                if (sd.status === 'done') {
+                  clearInterval(pollId);
+                  const email = document.getElementById('multiViewTitle').textContent.replace('Multi-View: ', '');
+                  closeMultiView();
+                  openMultiView(sessionId, email);
+                } else if (sd.status === 'error') {
+                  clearInterval(pollId);
+                  this.textContent = 'Failed — click to retry';
+                  this.style.background = '#f44336';
+                  this.disabled = false;
+                }
+              } catch (e) { console.error('[MVP] Poll error:', e); }
+            }, 5000);
+          } catch (err) {
+            this.textContent = 'Failed — click to retry';
+            this.style.background = '#f44336';
+            this.disabled = false;
+          }
+        };
+        box.appendChild(overlay);
       };
       console.log(`[MVP][${deviceType}] Playing combined video directly`);
       return;
@@ -1419,6 +1468,9 @@ async function mvInitDevice(sessionId, deviceType) {
       <div style="font-size:14px;font-weight:600;margin-bottom:8px;">${chunkCount} raw chunks found</div>
       <div style="font-size:12px;color:#aaa;margin-bottom:16px;">Needs compilation into a single video for smooth playback</div>
       <button onclick="mvTriggerCompile('${sessionId}', this)" style="background:#ff9800;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;">Compile Now</button>
+      <div style="margin-top:16px;border-top:1px solid #444;padding-top:12px;">
+        <button onclick="mvForcePlayRawChunks('${deviceType}')" style="background:transparent;color:#666;border:1px solid #555;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:11px;">Try playing raw chunks (may crash)</button>
+      </div>
     `;
     box.appendChild(overlay);
     console.log(`[MVP][${deviceType}] Raw chunks — showing compile prompt`);
@@ -1502,6 +1554,29 @@ async function mvTriggerCompile(sessionId, button) {
     button.disabled = false;
     button.onclick = () => mvTriggerCompile(sessionId, button);
   }
+}
+
+// Force-play raw chunks in multi-view (escape hatch when compilation isn't available)
+function mvForcePlayRawChunks(deviceType) {
+  const cap = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
+  const box = document.getElementById(`mv${cap}`);
+  const device = mvState.devices[deviceType];
+  if (!device || !device.chunks || device.chunks.length === 0) return;
+
+  // Remove the compile overlay
+  const overlay = box.querySelector('.mv-compile-overlay');
+  if (overlay) overlay.remove();
+
+  // Mark as no longer needing compile (so sync doesn't skip it)
+  device.needsCompile = false;
+  device.isCombined = false;
+
+  const label = box.querySelector('.mv-label');
+  if (label) label.textContent = `${cap} (${device.chunks.length} chunks — raw)`;
+
+  // Start playing chunks sequentially
+  console.log(`[MVP][${deviceType}] Force-playing ${device.chunks.length} raw chunks`);
+  mvLoadChunk(deviceType, 0);
 }
 
 // Main entry point
@@ -1881,6 +1956,14 @@ function _mvKeyHandler(e) {
 }
 
 // Verification log at end of script
-console.log('[Admin] Script fully loaded');
+console.log(`[Admin] Script v${ADMIN_JS_VERSION} fully loaded`);
 console.log('[Admin] switchTab function exists?', typeof switchTab !== 'undefined');
 console.log('[Admin] window.switchTab exists?', typeof window.switchTab !== 'undefined');
+
+// Check server version matches client version
+fetch('/api/version').then(r => r.json()).then(v => {
+  console.log(`[Admin] Server version: ${v.version} (${v.build})`);
+  if (v.version !== ADMIN_JS_VERSION) {
+    console.warn(`[Admin] VERSION MISMATCH! Client: ${ADMIN_JS_VERSION}, Server: ${v.version}. Hard refresh (Ctrl+Shift+R) recommended.`);
+  }
+}).catch(() => {});

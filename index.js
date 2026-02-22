@@ -11,9 +11,17 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    // Prevent browsers from caching JS files — ensures new deploys take effect immediately
+    if (filePath.endsWith('.js')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  }
+}));
 
 // API Routes
+app.get('/api/version', (req, res) => res.json({ version: '2.0.0', build: 'video-player-overhaul' }));
 app.get('/api/health', require('./api/health'));
 app.post('/api/validate-student', require('./api/validate-student'));
 app.post('/api/validate-admin', require('./api/validate-admin'));
