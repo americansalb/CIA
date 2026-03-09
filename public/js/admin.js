@@ -1504,8 +1504,8 @@ window.switchTab = switchTab;
 // COMPILE RECORDING
 // ====================
 
-// Client-side poll timeout: stop polling after 5 minutes
-const COMPILE_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+// Client-side poll timeout: match server max (15 min for large recordings)
+const COMPILE_POLL_TIMEOUT_MS = 15 * 60 * 1000;
 const COMPILE_POLL_INTERVAL_MS = 5000;
 
 function _fmtElapsed(ms) {
