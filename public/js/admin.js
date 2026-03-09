@@ -581,15 +581,16 @@ async function openVideoPlayer(sessionId, deviceType, studentEmail) {
   }
 }
 
-// === GAPLESS PLAYBACK ENGINE ===
-// Downloads all chunks, probes durations, plays gaplessly with dual-video swap
-// and a virtual timeline for seeking across the full recording.
+// === CHUNK PLAYER ENGINE ===
+// Downloads all chunks, probes durations, plays sequentially with a unified
+// seek bar across the full recording.  Uses a single <video> element — since
+// blob URLs are in-memory, switching src is nearly instant (no network fetch).
 
-let _gapless = null; // Active gapless playback state
-let _gaplessRAF = null; // Animation frame for timeline updates
+let _gapless = null; // { blobUrls, durations, cumulative, totalDuration, currentIdx, video, playbackRate, onChunkChange }
+let _gaplessRAF = null;
 
 // Probe real duration of a WebM blob.
-// MediaRecorder WebM often reports Infinity for duration — seek-to-end trick fixes it.
+// MediaRecorder WebM often reports Infinity — seek-to-end trick fixes it.
 function _probeBlobDuration(blobUrl) {
   return new Promise((resolve) => {
     const v = document.createElement('video');
@@ -617,133 +618,79 @@ function _probeBlobDuration(blobUrl) {
   });
 }
 
-// Get global playback time (position across all chunks)
+// Get global playback position across all chunks
 function _gaplessGlobalTime(g) {
   if (!g) g = _gapless;
   if (!g) return 0;
-  return g.cumulative[g.currentIdx] + (g.activeEl.currentTime || 0);
+  return g.cumulative[g.currentIdx] + (g.video.currentTime || 0);
 }
 
-// Set up the ended handler for auto-advance on chunk end
-function _gaplessSetupEnded(g, chunkIdx) {
-  if (!g) return;
-  g.activeEl.onended = () => {
+// Load a specific chunk into the video element and optionally seek within it
+function _gaplessLoadChunk(g, chunkIdx, localTime, autoplay) {
+  g.video.onended = null; // clear old handler before switching
+  g.currentIdx = chunkIdx;
+  g.video.src = g.blobUrls[chunkIdx];
+  g.video.load();
+  g.video.playbackRate = g.playbackRate;
+
+  g.video.onloadeddata = () => {
+    if (localTime > 0) g.video.currentTime = localTime;
+    if (autoplay) g.video.play().catch(e => console.warn('[Player] Play:', e.message));
+  };
+
+  // Auto-advance to next chunk when this one ends
+  g.video.onended = () => {
     const nextIdx = chunkIdx + 1;
     if (nextIdx >= g.blobUrls.length) {
-      console.log('[Gapless] Playback complete');
+      console.log('[Player] Playback complete');
       return;
     }
-    console.log(`[Gapless] Chunk ${chunkIdx + 1} ended, swapping to chunk ${nextIdx + 1}`);
-
-    // Swap: hide active, show standby
-    g.activeEl.style.display = 'none';
-    g.activeEl.onended = null;
-
-    g.standbyEl.style.display = 'block';
-    g.standbyEl.playbackRate = g.playbackRate;
-    g.standbyEl.play().catch(e => console.warn('[Gapless] Play:', e.message));
-
-    // Swap references
-    const tmp = g.activeEl;
-    g.activeEl = g.standbyEl;
-    g.standbyEl = tmp;
-    g.currentIdx = nextIdx;
-
-    // Set up ended handler for new active
-    _gaplessSetupEnded(g, nextIdx);
-
-    // Preload next-next into standby
-    const preloadIdx = nextIdx + 1;
-    if (preloadIdx < g.blobUrls.length) {
-      g.standbyEl.src = g.blobUrls[preloadIdx];
-      g.standbyEl.load();
-    }
-
-    // Update chunk sidebar UI
+    console.log(`[Player] Chunk ${chunkIdx + 1} ended, advancing to ${nextIdx + 1}`);
+    _gaplessLoadChunk(g, nextIdx, 0, true);
     if (g.onChunkChange) g.onChunkChange(nextIdx);
   };
 }
 
-// Seek to a global time position within gapless playback
-async function _gaplessSeek(g, globalTime) {
+// Seek to a global time position
+function _gaplessSeek(g, globalTime) {
   if (!g) return;
   globalTime = Math.max(0, Math.min(globalTime, g.totalDuration - 0.01));
 
   // Find which chunk this time falls in
   let chunkIdx = 0;
   for (let i = g.cumulative.length - 2; i >= 0; i--) {
-    if (globalTime >= g.cumulative[i]) {
-      chunkIdx = i;
-      break;
-    }
+    if (globalTime >= g.cumulative[i]) { chunkIdx = i; break; }
   }
 
   const localTime = globalTime - g.cumulative[chunkIdx];
-  const wasPaused = g.activeEl.paused;
+  const wasPaused = g.video.paused;
 
   if (chunkIdx === g.currentIdx) {
-    // Same chunk — just seek within it
-    g.activeEl.currentTime = localTime;
+    g.video.currentTime = localTime;
   } else {
-    // Different chunk — load into active video
-    console.log(`[Gapless] Seeking to chunk ${chunkIdx + 1}, local time ${localTime.toFixed(1)}s`);
-    g.activeEl.onended = null;
-    g.currentIdx = chunkIdx;
-
-    g.activeEl.src = g.blobUrls[chunkIdx];
-    g.activeEl.load();
-
-    await new Promise((resolve) => {
-      const onReady = () => resolve();
-      g.activeEl.addEventListener('loadeddata', onReady, { once: true });
-      setTimeout(resolve, 5000);
-    });
-
-    g.activeEl.currentTime = localTime;
-    g.activeEl.playbackRate = g.playbackRate;
-
-    if (!wasPaused) {
-      g.activeEl.play().catch(() => {});
-    }
-
-    // Set up ended handler
-    _gaplessSetupEnded(g, chunkIdx);
-
-    // Preload next chunk into standby
-    const nextIdx = chunkIdx + 1;
-    if (nextIdx < g.blobUrls.length) {
-      g.standbyEl.src = g.blobUrls[nextIdx];
-      g.standbyEl.load();
-    }
-
+    _gaplessLoadChunk(g, chunkIdx, localTime, !wasPaused);
     if (g.onChunkChange) g.onChunkChange(chunkIdx);
   }
 }
 
-// Clean up gapless state and release blob URLs
+// Clean up state and release blob URLs
 function _gaplessCleanup(g) {
   if (!g) return;
-  g.activeEl.onended = null;
-  g.standbyEl.onended = null;
-  g.activeEl.pause();
-  g.standbyEl.pause();
-  g.activeEl.removeAttribute('src');
-  g.activeEl.load();
-  g.standbyEl.removeAttribute('src');
-  g.standbyEl.load();
-  for (const url of g.blobUrls) {
-    URL.revokeObjectURL(url);
-  }
+  g.video.onended = null;
+  g.video.onloadeddata = null;
+  g.video.pause();
+  g.video.removeAttribute('src');
+  g.video.load();
+  for (const url of g.blobUrls) URL.revokeObjectURL(url);
 }
 
-// Helper: download chunks and probe durations, returns { blobUrls, durations, cumulative, totalDuration }
+// Download chunks and probe durations
 async function _downloadAndProbeChunks(chunks, onDownloadProgress, onProbeStart) {
   const blobUrls = [];
   for (let i = 0; i < chunks.length; i++) {
     const resp = await fetch(chunks[i].downloadUrl);
     if (!resp.ok) throw new Error(`Chunk ${i + 1} failed (${resp.status})`);
-    const blob = await resp.blob();
-    blobUrls.push(URL.createObjectURL(blob));
+    blobUrls.push(URL.createObjectURL(await resp.blob()));
     if (onDownloadProgress) onDownloadProgress(i + 1, chunks.length);
   }
 
@@ -753,69 +700,44 @@ async function _downloadAndProbeChunks(chunks, onDownloadProgress, onProbeStart)
   for (let i = 0; i < blobUrls.length; i++) {
     const d = await _probeBlobDuration(blobUrls[i]);
     durations.push(d);
-    console.log(`[Gapless] Chunk ${i + 1} duration: ${d.toFixed(1)}s`);
+    console.log(`[Player] Chunk ${i + 1} duration: ${d.toFixed(1)}s`);
   }
 
   const cumulative = [0];
   for (const d of durations) cumulative.push(cumulative[cumulative.length - 1] + d);
   const totalDuration = cumulative[cumulative.length - 1];
 
-  console.log(`[Gapless] Total: ${totalDuration.toFixed(1)}s across ${blobUrls.length} chunks`);
+  console.log(`[Player] Total: ${totalDuration.toFixed(1)}s across ${blobUrls.length} chunks`);
   return { blobUrls, durations, cumulative, totalDuration };
 }
 
-// Initialize gapless playback on two video elements
-function _initGaplessPlayback(videoA, videoB, probeResult) {
+// Initialize player on a single video element
+function _initGaplessPlayback(video, probeResult) {
   const g = {
     blobUrls: probeResult.blobUrls,
     durations: probeResult.durations,
     cumulative: probeResult.cumulative,
     totalDuration: probeResult.totalDuration,
     currentIdx: 0,
-    videoA, videoB,
-    activeEl: videoA,
-    standbyEl: videoB,
+    video,
     playbackRate: 1,
-    onChunkChange: null, // callback(chunkIdx)
+    onChunkChange: null,
   };
-
-  videoA.style.display = 'block';
-  videoB.style.display = 'none';
-
-  // Load first chunk
-  videoA.src = g.blobUrls[0];
-  videoA.load();
-  videoA.playbackRate = g.playbackRate;
-
-  // Preload second chunk
-  if (g.blobUrls.length > 1) {
-    videoB.src = g.blobUrls[1];
-    videoB.load();
-  }
-
-  // Set up auto-advance
-  _gaplessSetupEnded(g, 0);
-
-  // Auto-play when ready
-  videoA.onloadeddata = () => {
-    videoA.play().catch(e => console.warn('[Gapless] Autoplay:', e.message));
-  };
-
+  _gaplessLoadChunk(g, 0, 0, true);
   return g;
 }
 
-// Render a global timeline bar into a container element
+// Render a global timeline bar
 function _renderGaplessTimeline(containerEl, g, clickHandler) {
   const existing = containerEl.querySelector('#gaplessTimelineContainer');
   if (existing) existing.remove();
 
-  const totalStr = _fmtTime(g.totalDuration);
   const div = document.createElement('div');
   div.id = 'gaplessTimelineContainer';
   div.style.cssText = 'width: 100%; margin-top: 10px;';
   div.innerHTML = `
     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
-      <span id="gaplessTimeDisplay" style="color: #ccc; font-size: 12px; min-width: 100px;">0:00 / ${totalStr}</span>
+      <span id="gaplessTimeDisplay" style="color: #ccc; font-size: 12px; min-width: 100px;">0:00 / ${_fmtTime(g.totalDuration)}</span>
     </div>
     <div id="gaplessTimeline" style="position: relative; height: 20px; background: #2a2a2a; border-radius: 4px; cursor: pointer; user-select: none;">
       <div id="gaplessProgressFill" style="position: absolute; top: 0; left: 0; height: 100%; background: linear-gradient(90deg, #2196f3, #667eea); border-radius: 4px; width: 0%; pointer-events: none;"></div>
@@ -824,57 +746,47 @@ function _renderGaplessTimeline(containerEl, g, clickHandler) {
     </div>
   `;
   containerEl.appendChild(div);
+  div.querySelector('#gaplessTimeline').addEventListener('click', clickHandler);
 
-  // Click handler for seeking
-  const timeline = div.querySelector('#gaplessTimeline');
-  timeline.addEventListener('click', clickHandler);
-
-  // Add chunk boundary markers
-  const markerContainer = div.querySelector('#gaplessChunkMarkers');
+  const markers = div.querySelector('#gaplessChunkMarkers');
   for (let i = 1; i < g.cumulative.length - 1; i++) {
     const pct = (g.cumulative[i] / g.totalDuration) * 100;
-    const marker = document.createElement('div');
-    marker.style.cssText = `position:absolute;left:${pct}%;top:0;width:1px;height:100%;background:rgba(255,255,255,0.3);`;
-    markerContainer.appendChild(marker);
+    const m = document.createElement('div');
+    m.style.cssText = `position:absolute;left:${pct}%;top:0;width:1px;height:100%;background:rgba(255,255,255,0.3);`;
+    markers.appendChild(m);
   }
 }
 
-// Update the global timeline UI
+// Update timeline UI
 function _updateGaplessTimeline(g) {
-  const globalTime = _gaplessGlobalTime(g);
-  const pct = g.totalDuration > 0 ? (globalTime / g.totalDuration) * 100 : 0;
-
+  const t = _gaplessGlobalTime(g);
+  const pct = g.totalDuration > 0 ? (t / g.totalDuration) * 100 : 0;
   const fill = document.getElementById('gaplessProgressFill');
   const head = document.getElementById('gaplessPlayhead');
   const timeEl = document.getElementById('gaplessTimeDisplay');
-
   if (fill) fill.style.width = `${pct}%`;
   if (head) head.style.left = `${pct}%`;
-  if (timeEl) timeEl.textContent = `${_fmtTime(globalTime)} / ${_fmtTime(g.totalDuration)}`;
+  if (timeEl) timeEl.textContent = `${_fmtTime(t)} / ${_fmtTime(g.totalDuration)}`;
 }
 
-// Single-view: timeline update loop
 function _gaplessTimelineLoop() {
   if (!_gapless) { _gaplessRAF = null; return; }
   _updateGaplessTimeline(_gapless);
   _gaplessRAF = requestAnimationFrame(_gaplessTimelineLoop);
 }
 
-// Single-view: handle click on global timeline
 function _gaplessTimelineClick(event) {
   if (!_gapless) return;
   const bar = document.getElementById('gaplessTimeline');
   const rect = bar.getBoundingClientRect();
   const pct = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-  const targetTime = pct * _gapless.totalDuration;
-  _gaplessSeek(_gapless, targetTime);
+  _gaplessSeek(_gapless, pct * _gapless.totalDuration);
 }
 
-// Main entry: download all chunks and play gaplessly with seeking
+// Download all chunks and play with seeking
 async function forcePlayRawChunks() {
   const videoLoading = document.getElementById('videoLoading');
-  const videoA = document.getElementById('chunkVideo');
-  const videoB = document.getElementById('chunkVideoB');
+  const video = document.getElementById('chunkVideo');
 
   videoLoading.style.display = 'block';
   videoLoading.innerHTML = `
@@ -891,10 +803,10 @@ async function forcePlayRawChunks() {
     const probeResult = await _downloadAndProbeChunks(
       currentChunks,
       (done, total) => {
-        const progress = document.getElementById('chunkDownloadProgress');
-        const bar = document.getElementById('chunkDownloadBar');
-        if (progress) progress.textContent = `${done} / ${total}`;
-        if (bar) bar.style.width = `${(done / total) * 100}%`;
+        const p = document.getElementById('chunkDownloadProgress');
+        const b = document.getElementById('chunkDownloadBar');
+        if (p) p.textContent = `${done} / ${total}`;
+        if (b) b.style.width = `${(done / total) * 100}%`;
       },
       () => {
         const el = document.getElementById('chunkDownloadProgress');
@@ -902,10 +814,9 @@ async function forcePlayRawChunks() {
       }
     );
 
-    // Initialize gapless playback
-    const g = _initGaplessPlayback(videoA, videoB, probeResult);
+    const g = _initGaplessPlayback(video, probeResult);
     g.playbackRate = parseFloat(document.getElementById('playbackSpeed')?.value || '1');
-    videoA.playbackRate = g.playbackRate;
+    video.playbackRate = g.playbackRate;
     g.onChunkChange = (idx) => {
       document.getElementById('currentChunkNum').textContent = idx + 1;
       document.querySelectorAll('.chunk-item').forEach((item, i) => {
@@ -915,24 +826,20 @@ async function forcePlayRawChunks() {
     };
     _gapless = g;
 
-    // Update UI
     videoLoading.style.display = 'none';
+    video.style.display = 'block';
     document.getElementById('prevChunkBtn').style.display = 'none';
     document.getElementById('nextChunkBtn').style.display = 'none';
     document.getElementById('currentChunkNum').textContent = '1';
     document.getElementById('totalChunks').textContent = `${probeResult.blobUrls.length} (gapless)`;
 
-    // Add global timeline
-    const controlsDiv = document.querySelector('.video-controls');
-    _renderGaplessTimeline(controlsDiv, g, _gaplessTimelineClick);
-
-    // Start timeline update loop
+    _renderGaplessTimeline(document.querySelector('.video-controls'), g, _gaplessTimelineClick);
     if (_gaplessRAF) cancelAnimationFrame(_gaplessRAF);
     _gaplessRAF = requestAnimationFrame(_gaplessTimelineLoop);
 
-    console.log(`[Gapless] Single-view playback initialized with ${probeResult.blobUrls.length} chunks`);
+    console.log(`[Player] Initialized with ${probeResult.blobUrls.length} chunks`);
   } catch (error) {
-    console.error('[Gapless] Error:', error);
+    console.error('[Player] Error:', error);
     videoLoading.innerHTML = `
       <div style="text-align: center; color: #f44336;">
         <div style="font-size: 14px; font-weight: 600;">Download failed</div>
@@ -1229,24 +1136,13 @@ function closeVideoPlayer() {
   }
   _preloadedBlobs = {};
 
-  // Stop video A
+  // Stop video
   if (videoElement) {
     videoElement.pause();
     videoElement.src = '';
     videoElement.onloadeddata = null;
     videoElement.onerror = null;
     videoElement.onended = null;
-  }
-
-  // Stop video B
-  const videoB = document.getElementById('chunkVideoB');
-  if (videoB) {
-    videoB.pause();
-    videoB.src = '';
-    videoB.style.display = 'none';
-    videoB.onloadeddata = null;
-    videoB.onerror = null;
-    videoB.onended = null;
   }
 
   // Reset prev/next button visibility
@@ -1268,8 +1164,7 @@ function setPlaybackSpeed(rate) {
   rate = parseFloat(rate);
   if (_gapless) {
     _gapless.playbackRate = rate;
-    _gapless.activeEl.playbackRate = rate;
-    _gapless.standbyEl.playbackRate = rate;
+    _gapless.video.playbackRate = rate;
   } else if (videoElement) {
     videoElement.playbackRate = rate;
   }
@@ -2168,25 +2063,20 @@ async function mvDownloadAndPlay(deviceType, button) {
     const overlay = box.querySelector('.mv-compile-overlay');
     if (overlay) overlay.remove();
 
-    // Get the two video elements for this device
-    const videoA = document.getElementById(`mv${cap}Video`);
-    const videoB = document.getElementById(`mv${cap}VideoB`);
-
-    // Initialize gapless playback for this device
-    const g = _initGaplessPlayback(videoA, videoB, probeResult);
+    // Initialize chunk player on the device's single video element
+    const video = document.getElementById(`mv${cap}Video`);
+    const g = _initGaplessPlayback(video, probeResult);
     const speed = parseFloat(document.getElementById('mvPlaybackSpeed')?.value || '1');
     g.playbackRate = speed;
-    videoA.playbackRate = speed;
+    video.playbackRate = speed;
 
-    // Store gapless state in the device
+    // Store state in the device
     device.gapless = g;
     device.needsCompile = false;
-    device.isCombined = true; // Treat as combined for timeline/sync purposes
-    device.video = videoA; // Active video reference
+    device.isCombined = true;
+    device.video = video;
 
-    // Track which element is active so sync can find the right one
     g.onChunkChange = (idx) => {
-      device.video = g.activeEl;
       console.log(`[MVP][${deviceType}] Chunk ${idx + 1} playing`);
     };
 
@@ -2271,9 +2161,8 @@ function spotlightVideo(deviceType) {
 function playAllVideos() {
   console.log(`[MVP] Playing all videos`);
   for (const [dt, device] of Object.entries(mvState.devices)) {
-    const v = device.gapless ? device.gapless.activeEl : device.video;
-    if (v && v.src) {
-      v.play().catch(e => console.warn(`[MVP][${dt}] Play failed:`, e.message));
+    if (device.video && device.video.src) {
+      device.video.play().catch(e => console.warn(`[MVP][${dt}] Play failed:`, e.message));
     }
   }
 }
@@ -2281,8 +2170,7 @@ function playAllVideos() {
 function pauseAllVideos() {
   console.log(`[MVP] Pausing all videos`);
   for (const device of Object.values(mvState.devices)) {
-    const v = device.gapless ? device.gapless.activeEl : device.video;
-    if (v) v.pause();
+    if (device.video) device.video.pause();
   }
 }
 
@@ -2310,8 +2198,7 @@ function syncAllVideos() {
         console.log(`[MVP][${dt}] Synced to ${targetTime.toFixed(1)}s (offset: ${offsetSec.toFixed(1)}s)`);
       } else {
         _mvDeviceSeekTo(device, 0);
-        const v = device.gapless ? device.gapless.activeEl : device.video;
-        if (v) v.pause();
+        if (device.video) device.video.pause();
         console.log(`[MVP][${dt}] Not started yet (offset: ${offsetSec.toFixed(1)}s)`);
       }
     } else {
@@ -2341,18 +2228,7 @@ function closeMultiView() {
       device.video.src = '';
       device.video.onloadeddata = null;
       device.video.onerror = null;
-    }
-
-    // Clean up video B element
-    const cap = dt.charAt(0).toUpperCase() + dt.slice(1);
-    const videoB = document.getElementById(`mv${cap}VideoB`);
-    if (videoB) {
-      videoB.pause();
-      videoB.src = '';
-      videoB.style.display = 'none';
-      videoB.onloadeddata = null;
-      videoB.onerror = null;
-      videoB.onended = null;
+      device.video.onended = null;
     }
   }
 
@@ -2389,21 +2265,18 @@ function mvTogglePlayPause() {
   const device = mvState.devices[mvState.spotlight];
   if (!device) return;
 
-  const activeVideo = device.gapless ? device.gapless.activeEl : device.video;
-  if (!activeVideo) return;
+  if (!device.video) return;
 
-  if (activeVideo.paused) {
+  if (device.video.paused) {
     // Play all devices
     for (const [dt, dev] of Object.entries(mvState.devices)) {
-      const v = dev.gapless ? dev.gapless.activeEl : dev.video;
-      if (v && v.src) v.play().catch(e => console.warn(`[MVP][${dt}] Play failed:`, e.message));
+      if (dev.video && dev.video.src) dev.video.play().catch(e => console.warn(`[MVP][${dt}] Play failed:`, e.message));
     }
     document.getElementById('mvPlayPauseBtn').textContent = '⏸';
   } else {
     // Pause all devices
     for (const dev of Object.values(mvState.devices)) {
-      const v = dev.gapless ? dev.gapless.activeEl : dev.video;
-      if (v) v.pause();
+      if (dev.video) dev.video.pause();
     }
     document.getElementById('mvPlayPauseBtn').textContent = '▶';
   }
@@ -2415,8 +2288,7 @@ function mvSetSpeed(speed) {
   for (const device of Object.values(mvState.devices)) {
     if (device.gapless) {
       device.gapless.playbackRate = rate;
-      device.gapless.activeEl.playbackRate = rate;
-      device.gapless.standbyEl.playbackRate = rate;
+      device.gapless.video.playbackRate = rate;
     } else if (device.video) {
       device.video.playbackRate = rate;
     }
@@ -2539,13 +2411,12 @@ function _mvContinuousSync(masterTime) {
     }
 
     // Match play state — use the reference device's active element
-    const refVideo = refDevice.gapless ? refDevice.gapless.activeEl : refDevice.video;
-    const slaveVideo = device.gapless ? device.gapless.activeEl : device.video;
-    if (refVideo && slaveVideo) {
-      if (!refVideo.paused && slaveVideo.paused && targetTime >= 0) {
-        slaveVideo.play().catch(() => {});
-      } else if (refVideo.paused && !slaveVideo.paused) {
-        slaveVideo.pause();
+    // Match play state
+    if (refDevice.video && device.video) {
+      if (!refDevice.video.paused && device.video.paused && targetTime >= 0) {
+        device.video.play().catch(() => {});
+      } else if (refDevice.video.paused && !device.video.paused) {
+        device.video.pause();
       }
     }
   }
@@ -2574,8 +2445,7 @@ function _mvUpdateLoop() {
 
     // Update play/pause button state
     const ppBtn = document.getElementById('mvPlayPauseBtn');
-    const activeVid = device.gapless ? device.gapless.activeEl : device.video;
-    if (ppBtn && activeVid) ppBtn.textContent = activeVid.paused ? '▶' : '⏸';
+    if (ppBtn && device.video) ppBtn.textContent = device.video.paused ? '▶' : '⏸';
 
     // Continuous sync every frame
     _mvContinuousSync();
