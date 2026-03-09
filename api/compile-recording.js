@@ -266,6 +266,7 @@ async function startCompile(req, res) {
         continue;
       }
 
+      console.log(`[compile] ${sessionId}/${deviceType}: found ${chunks.length} chunks: ${chunks.map(c => c.name).join(', ')}`);
       status.devices[deviceType] = { status: 'queued', chunks: chunks.length };
 
       compileQueue.push({
