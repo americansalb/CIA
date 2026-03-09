@@ -153,10 +153,10 @@ function renderCompactTable(attempts) {
     let actionHtml = '';
     if (hasRealVideo) {
       actionHtml += `<button onclick="openMultiView('${a.sessionId}', '${a.email}')" style="background: #667eea; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Watch</button> `;
-      actionHtml += `<button onclick="compileRecording('${a.sessionId}', this, true)" style="background: #6c757d; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 11px;">Recompile</button> `;
+      actionHtml += `<button onclick="compileRecording('${a.sessionId}', this, true)" style="background: #6c757d; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 11px;">Recompile to MP4</button> `;
     }
     if (needsCompile) {
-      actionHtml += `<button id="compile-btn-${a.sessionId}" onclick="compileRecording('${a.sessionId}', this, false)" style="background: #ff9800; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Compile (${totalChunks} chunks)</button>`;
+      actionHtml += `<button id="compile-btn-${a.sessionId}" onclick="compileRecording('${a.sessionId}', this, false)" style="background: #ff9800; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Compile to MP4 (${totalChunks} chunks)</button>`;
     }
     if (!hasRealVideo && !needsCompile && !isPractice) {
       actionHtml = '<span style="color: #999; font-size: 11px;">No video</span>';
@@ -553,16 +553,17 @@ async function openVideoPlayer(sessionId, deviceType, studentEmail) {
         <div style="font-size: 48px; margin-bottom: 16px;">🎬</div>
         <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">${chunkCount} raw chunks found</div>
         <div style="font-size: 13px; color: #aaa; margin-bottom: 20px;">
-          Raw chunks cannot be played smoothly. Compile them into a single video first.
+          Choose how to watch:
         </div>
-        <button id="singleViewCompileBtn" onclick="singleViewCompile('${sessionId}', this)" style="background: #ff9800; color: white; border: none; padding: 12px 32px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">
-          Compile Now
+        <button id="svPlayBtn" onclick="svStartPlay(this)" style="background: #2196f3; color: white; border: none; padding: 12px 32px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">
+          Play Now
         </button>
+        <div style="font-size: 11px; color: #888; margin-top: 6px;">Downloads chunks and plays instantly in browser</div>
         <div style="margin-top: 16px; border-top: 1px solid #333; padding-top: 16px;">
-          <button onclick="forcePlayRawChunks()" style="background: #2196f3; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;">
-            Download &amp; Play Now
+          <button id="svCompileBtn" onclick="svStartCompile('${sessionId}', this)" style="background: #ff9800; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;">
+            Compile to MP4
           </button>
-          <div style="font-size: 11px; color: #666; margin-top: 6px;">Downloads all chunks, combines in browser</div>
+          <div style="font-size: 11px; color: #666; margin-top: 6px;">Server-side — creates a permanent seekable video (takes a few minutes)</div>
         </div>
       </div>
     `;
@@ -781,6 +782,21 @@ function _gaplessTimelineClick(event) {
   const rect = bar.getBoundingClientRect();
   const pct = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
   _gaplessSeek(_gapless, pct * _gapless.totalDuration);
+}
+
+// ---- Single-view action wrappers with mutual exclusion ----
+function svStartPlay(button) {
+  // Disable the compile button so user can't start both
+  const compileBtn = document.getElementById('svCompileBtn');
+  if (compileBtn) { compileBtn.disabled = true; compileBtn.style.opacity = '0.4'; }
+  forcePlayRawChunks();
+}
+
+function svStartCompile(sessionId, button) {
+  // Disable the play button so user can't start both
+  const playBtn = document.getElementById('svPlayBtn');
+  if (playBtn) { playBtn.disabled = true; playBtn.style.opacity = '0.4'; }
+  singleViewCompile(sessionId, button);
 }
 
 // Download all chunks and play with seeking
@@ -1787,10 +1803,10 @@ async function mvInitDevice(sessionId, deviceType) {
           <div style="font-size:36px;margin-bottom:12px;">⚠️</div>
           <div style="font-size:14px;font-weight:600;margin-bottom:8px;">Combined video failed to play</div>
           <div style="font-size:12px;color:#aaa;margin-bottom:12px;">The compiled video may be corrupted.</div>
-          ${hasRawChunks ? `<button onclick="mvDownloadAndPlay('${deviceType}', this)" style="background:#2196f3;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;margin-bottom:8px;">Download & Play (${device.chunks.length} chunks)</button>
-          <div style="font-size:11px;color:#888;margin-bottom:10px;">Instant — combines chunks in browser</div>` : ''}
-          <button onclick="mvForceRecompile('${sessionId}', this)" style="background:#ff9800;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;">Recompile (force)</button>
-          <div style="font-size:11px;color:#888;margin-top:4px;">Slower — creates seekable MP4 on server</div>
+          ${hasRawChunks ? `<button class="mv-action-btn" onclick="mvStartPlay('${deviceType}', this)" style="background:#2196f3;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;margin-bottom:4px;">Play Now (${device.chunks.length} chunks)</button>
+          <div style="font-size:10px;color:#888;margin-bottom:10px;">Downloads and plays in browser</div>` : ''}
+          <button class="mv-action-btn" onclick="mvStartRecompile('${sessionId}', this)" style="background:#ff9800;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;">Recompile</button>
+          <div style="font-size:10px;color:#888;margin-top:4px;">Re-creates MP4 on server</div>
         `;
         box.appendChild(overlay);
       };
@@ -1821,9 +1837,11 @@ async function mvInitDevice(sessionId, deviceType) {
     overlay.innerHTML = `
       <div style="font-size:36px;margin-bottom:12px;">🎬</div>
       <div style="font-size:14px;font-weight:600;margin-bottom:8px;">${chunkCount} raw chunks found</div>
-      <div style="font-size:12px;color:#aaa;margin-bottom:12px;">Needs compilation for seekable playback</div>
-      <button onclick="mvTriggerCompile('${sessionId}', this)" style="background:#ff9800;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;margin-bottom:8px;">Compile Now (server)</button>
-      <button onclick="mvDownloadAndPlay('${deviceType}', this)" style="background:#2196f3;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;">Download &amp; Play</button>
+      <div style="font-size:12px;color:#aaa;margin-bottom:12px;">Choose how to watch:</div>
+      <button class="mv-action-btn" onclick="mvStartPlay('${deviceType}', this)" style="background:#2196f3;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;margin-bottom:4px;">Play Now</button>
+      <div style="font-size:10px;color:#888;margin-bottom:10px;">Downloads and plays in browser</div>
+      <button class="mv-action-btn" onclick="mvStartCompile('${sessionId}', this)" style="background:#ff9800;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;">Compile to MP4</button>
+      <div style="font-size:10px;color:#888;margin-top:4px;">Server-side, takes a few minutes</div>
     `;
     box.appendChild(overlay);
     console.log(`[MVP][${deviceType}] Raw chunks — showing compile prompt`);
@@ -1833,6 +1851,30 @@ async function mvInitDevice(sessionId, deviceType) {
     box.classList.remove('loading');
     if (label) label.textContent = `${cap} (Error)`;
   }
+}
+
+// ---- Multi-view action wrappers with mutual exclusion ----
+function _mvDisableSiblingBtns(clickedBtn) {
+  const overlay = clickedBtn.closest('.mv-compile-overlay');
+  if (!overlay) return;
+  overlay.querySelectorAll('.mv-action-btn').forEach(btn => {
+    if (btn !== clickedBtn) { btn.disabled = true; btn.style.opacity = '0.4'; }
+  });
+}
+
+function mvStartPlay(deviceType, button) {
+  _mvDisableSiblingBtns(button);
+  mvDownloadAndPlay(deviceType, button);
+}
+
+function mvStartCompile(sessionId, button) {
+  _mvDisableSiblingBtns(button);
+  mvTriggerCompile(sessionId, button);
+}
+
+function mvStartRecompile(sessionId, button) {
+  _mvDisableSiblingBtns(button);
+  mvForceRecompile(sessionId, button);
 }
 
 // Trigger compilation from multi-view player
