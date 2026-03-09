@@ -1,5 +1,5 @@
-// Admin panel script — v2.0.0 (video-player-overhaul)
-const ADMIN_JS_VERSION = '2.0.0';
+// Admin panel script — v2.1.0 (gapless-playback)
+const ADMIN_JS_VERSION = '2.1.0';
 console.log(`[Admin] admin.js v${ADMIN_JS_VERSION} loaded at`, new Date().toISOString());
 let adminEmail = null;
 let allRecordings = [];
@@ -581,11 +581,300 @@ async function openVideoPlayer(sessionId, deviceType, studentEmail) {
   }
 }
 
-// Download all raw chunks, concatenate in browser, and play as a single video.
-// MediaRecorder WebM chunks are contiguous slices of the output stream —
-// concatenating them reconstructs the original playable WebM.
+// === GAPLESS PLAYBACK ENGINE ===
+// Downloads all chunks, probes durations, plays gaplessly with dual-video swap
+// and a virtual timeline for seeking across the full recording.
+
+let _gapless = null; // Active gapless playback state
+let _gaplessRAF = null; // Animation frame for timeline updates
+
+// Probe real duration of a WebM blob.
+// MediaRecorder WebM often reports Infinity for duration — seek-to-end trick fixes it.
+function _probeBlobDuration(blobUrl) {
+  return new Promise((resolve) => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.muted = true;
+    v.src = blobUrl;
+    let resolved = false;
+    const done = (d) => {
+      if (resolved) return;
+      resolved = true;
+      v.removeAttribute('src');
+      v.load();
+      resolve(d);
+    };
+    v.onloadedmetadata = () => {
+      if (isFinite(v.duration) && v.duration > 0) {
+        done(v.duration);
+      } else {
+        v.currentTime = 1e10;
+        v.onseeked = () => done(isFinite(v.duration) && v.duration > 0 ? v.duration : 30);
+      }
+    };
+    v.onerror = () => done(30);
+    setTimeout(() => done(30), 5000);
+  });
+}
+
+// Get global playback time (position across all chunks)
+function _gaplessGlobalTime(g) {
+  if (!g) g = _gapless;
+  if (!g) return 0;
+  return g.cumulative[g.currentIdx] + (g.activeEl.currentTime || 0);
+}
+
+// Set up the ended handler for auto-advance on chunk end
+function _gaplessSetupEnded(g, chunkIdx) {
+  if (!g) return;
+  g.activeEl.onended = () => {
+    const nextIdx = chunkIdx + 1;
+    if (nextIdx >= g.blobUrls.length) {
+      console.log('[Gapless] Playback complete');
+      return;
+    }
+    console.log(`[Gapless] Chunk ${chunkIdx + 1} ended, swapping to chunk ${nextIdx + 1}`);
+
+    // Swap: hide active, show standby
+    g.activeEl.style.display = 'none';
+    g.activeEl.onended = null;
+
+    g.standbyEl.style.display = 'block';
+    g.standbyEl.playbackRate = g.playbackRate;
+    g.standbyEl.play().catch(e => console.warn('[Gapless] Play:', e.message));
+
+    // Swap references
+    const tmp = g.activeEl;
+    g.activeEl = g.standbyEl;
+    g.standbyEl = tmp;
+    g.currentIdx = nextIdx;
+
+    // Set up ended handler for new active
+    _gaplessSetupEnded(g, nextIdx);
+
+    // Preload next-next into standby
+    const preloadIdx = nextIdx + 1;
+    if (preloadIdx < g.blobUrls.length) {
+      g.standbyEl.src = g.blobUrls[preloadIdx];
+      g.standbyEl.load();
+    }
+
+    // Update chunk sidebar UI
+    if (g.onChunkChange) g.onChunkChange(nextIdx);
+  };
+}
+
+// Seek to a global time position within gapless playback
+async function _gaplessSeek(g, globalTime) {
+  if (!g) return;
+  globalTime = Math.max(0, Math.min(globalTime, g.totalDuration - 0.01));
+
+  // Find which chunk this time falls in
+  let chunkIdx = 0;
+  for (let i = g.cumulative.length - 2; i >= 0; i--) {
+    if (globalTime >= g.cumulative[i]) {
+      chunkIdx = i;
+      break;
+    }
+  }
+
+  const localTime = globalTime - g.cumulative[chunkIdx];
+  const wasPaused = g.activeEl.paused;
+
+  if (chunkIdx === g.currentIdx) {
+    // Same chunk — just seek within it
+    g.activeEl.currentTime = localTime;
+  } else {
+    // Different chunk — load into active video
+    console.log(`[Gapless] Seeking to chunk ${chunkIdx + 1}, local time ${localTime.toFixed(1)}s`);
+    g.activeEl.onended = null;
+    g.currentIdx = chunkIdx;
+
+    g.activeEl.src = g.blobUrls[chunkIdx];
+    g.activeEl.load();
+
+    await new Promise((resolve) => {
+      const onReady = () => resolve();
+      g.activeEl.addEventListener('loadeddata', onReady, { once: true });
+      setTimeout(resolve, 5000);
+    });
+
+    g.activeEl.currentTime = localTime;
+    g.activeEl.playbackRate = g.playbackRate;
+
+    if (!wasPaused) {
+      g.activeEl.play().catch(() => {});
+    }
+
+    // Set up ended handler
+    _gaplessSetupEnded(g, chunkIdx);
+
+    // Preload next chunk into standby
+    const nextIdx = chunkIdx + 1;
+    if (nextIdx < g.blobUrls.length) {
+      g.standbyEl.src = g.blobUrls[nextIdx];
+      g.standbyEl.load();
+    }
+
+    if (g.onChunkChange) g.onChunkChange(chunkIdx);
+  }
+}
+
+// Clean up gapless state and release blob URLs
+function _gaplessCleanup(g) {
+  if (!g) return;
+  g.activeEl.onended = null;
+  g.standbyEl.onended = null;
+  g.activeEl.pause();
+  g.standbyEl.pause();
+  g.activeEl.removeAttribute('src');
+  g.activeEl.load();
+  g.standbyEl.removeAttribute('src');
+  g.standbyEl.load();
+  for (const url of g.blobUrls) {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// Helper: download chunks and probe durations, returns { blobUrls, durations, cumulative, totalDuration }
+async function _downloadAndProbeChunks(chunks, onDownloadProgress, onProbeStart) {
+  const blobUrls = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const resp = await fetch(chunks[i].downloadUrl);
+    if (!resp.ok) throw new Error(`Chunk ${i + 1} failed (${resp.status})`);
+    const blob = await resp.blob();
+    blobUrls.push(URL.createObjectURL(blob));
+    if (onDownloadProgress) onDownloadProgress(i + 1, chunks.length);
+  }
+
+  if (onProbeStart) onProbeStart();
+
+  const durations = [];
+  for (let i = 0; i < blobUrls.length; i++) {
+    const d = await _probeBlobDuration(blobUrls[i]);
+    durations.push(d);
+    console.log(`[Gapless] Chunk ${i + 1} duration: ${d.toFixed(1)}s`);
+  }
+
+  const cumulative = [0];
+  for (const d of durations) cumulative.push(cumulative[cumulative.length - 1] + d);
+  const totalDuration = cumulative[cumulative.length - 1];
+
+  console.log(`[Gapless] Total: ${totalDuration.toFixed(1)}s across ${blobUrls.length} chunks`);
+  return { blobUrls, durations, cumulative, totalDuration };
+}
+
+// Initialize gapless playback on two video elements
+function _initGaplessPlayback(videoA, videoB, probeResult) {
+  const g = {
+    blobUrls: probeResult.blobUrls,
+    durations: probeResult.durations,
+    cumulative: probeResult.cumulative,
+    totalDuration: probeResult.totalDuration,
+    currentIdx: 0,
+    videoA, videoB,
+    activeEl: videoA,
+    standbyEl: videoB,
+    playbackRate: 1,
+    onChunkChange: null, // callback(chunkIdx)
+  };
+
+  videoA.style.display = 'block';
+  videoB.style.display = 'none';
+
+  // Load first chunk
+  videoA.src = g.blobUrls[0];
+  videoA.load();
+  videoA.playbackRate = g.playbackRate;
+
+  // Preload second chunk
+  if (g.blobUrls.length > 1) {
+    videoB.src = g.blobUrls[1];
+    videoB.load();
+  }
+
+  // Set up auto-advance
+  _gaplessSetupEnded(g, 0);
+
+  // Auto-play when ready
+  videoA.onloadeddata = () => {
+    videoA.play().catch(e => console.warn('[Gapless] Autoplay:', e.message));
+  };
+
+  return g;
+}
+
+// Render a global timeline bar into a container element
+function _renderGaplessTimeline(containerEl, g, clickHandler) {
+  const existing = containerEl.querySelector('#gaplessTimelineContainer');
+  if (existing) existing.remove();
+
+  const totalStr = _fmtTime(g.totalDuration);
+  const div = document.createElement('div');
+  div.id = 'gaplessTimelineContainer';
+  div.style.cssText = 'width: 100%; margin-top: 10px;';
+  div.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+      <span id="gaplessTimeDisplay" style="color: #ccc; font-size: 12px; min-width: 100px;">0:00 / ${totalStr}</span>
+    </div>
+    <div id="gaplessTimeline" style="position: relative; height: 20px; background: #2a2a2a; border-radius: 4px; cursor: pointer; user-select: none;">
+      <div id="gaplessProgressFill" style="position: absolute; top: 0; left: 0; height: 100%; background: linear-gradient(90deg, #2196f3, #667eea); border-radius: 4px; width: 0%; pointer-events: none;"></div>
+      <div id="gaplessChunkMarkers" style="position: absolute; top: 0; left: 0; right: 0; height: 100%; pointer-events: none;"></div>
+      <div id="gaplessPlayhead" style="position: absolute; top: -2px; width: 4px; height: 24px; background: white; border-radius: 2px; left: 0%; transform: translateX(-50%); pointer-events: none;"></div>
+    </div>
+  `;
+  containerEl.appendChild(div);
+
+  // Click handler for seeking
+  const timeline = div.querySelector('#gaplessTimeline');
+  timeline.addEventListener('click', clickHandler);
+
+  // Add chunk boundary markers
+  const markerContainer = div.querySelector('#gaplessChunkMarkers');
+  for (let i = 1; i < g.cumulative.length - 1; i++) {
+    const pct = (g.cumulative[i] / g.totalDuration) * 100;
+    const marker = document.createElement('div');
+    marker.style.cssText = `position:absolute;left:${pct}%;top:0;width:1px;height:100%;background:rgba(255,255,255,0.3);`;
+    markerContainer.appendChild(marker);
+  }
+}
+
+// Update the global timeline UI
+function _updateGaplessTimeline(g) {
+  const globalTime = _gaplessGlobalTime(g);
+  const pct = g.totalDuration > 0 ? (globalTime / g.totalDuration) * 100 : 0;
+
+  const fill = document.getElementById('gaplessProgressFill');
+  const head = document.getElementById('gaplessPlayhead');
+  const timeEl = document.getElementById('gaplessTimeDisplay');
+
+  if (fill) fill.style.width = `${pct}%`;
+  if (head) head.style.left = `${pct}%`;
+  if (timeEl) timeEl.textContent = `${_fmtTime(globalTime)} / ${_fmtTime(g.totalDuration)}`;
+}
+
+// Single-view: timeline update loop
+function _gaplessTimelineLoop() {
+  if (!_gapless) { _gaplessRAF = null; return; }
+  _updateGaplessTimeline(_gapless);
+  _gaplessRAF = requestAnimationFrame(_gaplessTimelineLoop);
+}
+
+// Single-view: handle click on global timeline
+function _gaplessTimelineClick(event) {
+  if (!_gapless) return;
+  const bar = document.getElementById('gaplessTimeline');
+  const rect = bar.getBoundingClientRect();
+  const pct = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  const targetTime = pct * _gapless.totalDuration;
+  _gaplessSeek(_gapless, targetTime);
+}
+
+// Main entry: download all chunks and play gaplessly with seeking
 async function forcePlayRawChunks() {
   const videoLoading = document.getElementById('videoLoading');
+  const videoA = document.getElementById('chunkVideo');
+  const videoB = document.getElementById('chunkVideoB');
 
   videoLoading.style.display = 'block';
   videoLoading.innerHTML = `
@@ -599,36 +888,51 @@ async function forcePlayRawChunks() {
   `;
 
   try {
-    const blobs = [];
-    for (let i = 0; i < currentChunks.length; i++) {
-      const response = await fetch(currentChunks[i].downloadUrl);
-      if (!response.ok) throw new Error(`Chunk ${i + 1} download failed (${response.status})`);
-      blobs.push(await response.blob());
+    const probeResult = await _downloadAndProbeChunks(
+      currentChunks,
+      (done, total) => {
+        const progress = document.getElementById('chunkDownloadProgress');
+        const bar = document.getElementById('chunkDownloadBar');
+        if (progress) progress.textContent = `${done} / ${total}`;
+        if (bar) bar.style.width = `${(done / total) * 100}%`;
+      },
+      () => {
+        const el = document.getElementById('chunkDownloadProgress');
+        if (el) el.textContent = 'Preparing playback...';
+      }
+    );
 
-      const progress = document.getElementById('chunkDownloadProgress');
-      const bar = document.getElementById('chunkDownloadBar');
-      if (progress) progress.textContent = `${i + 1} / ${currentChunks.length}`;
-      if (bar) bar.style.width = `${((i + 1) / currentChunks.length) * 100}%`;
-    }
+    // Initialize gapless playback
+    const g = _initGaplessPlayback(videoA, videoB, probeResult);
+    g.playbackRate = parseFloat(document.getElementById('playbackSpeed')?.value || '1');
+    videoA.playbackRate = g.playbackRate;
+    g.onChunkChange = (idx) => {
+      document.getElementById('currentChunkNum').textContent = idx + 1;
+      document.querySelectorAll('.chunk-item').forEach((item, i) => {
+        item.classList.toggle('active', i === idx);
+        if (i <= idx) item.classList.add('loaded');
+      });
+    };
+    _gapless = g;
 
-    const fullBlob = new Blob(blobs, { type: 'video/webm' });
-    const url = URL.createObjectURL(fullBlob);
-
+    // Update UI
     videoLoading.style.display = 'none';
-    videoElement.style.display = 'block';
-    videoElement.src = url;
-    videoElement.load();
-    videoElement.play().catch(e => console.warn('Autoplay blocked:', e.message));
-
-    // Hide prev/next — single combined blob
     document.getElementById('prevChunkBtn').style.display = 'none';
     document.getElementById('nextChunkBtn').style.display = 'none';
     document.getElementById('currentChunkNum').textContent = '1';
-    document.getElementById('totalChunks').textContent = '1 (combined)';
+    document.getElementById('totalChunks').textContent = `${probeResult.blobUrls.length} (gapless)`;
 
-    console.log(`[RawPlay] Concatenated ${blobs.length} chunks into ${(fullBlob.size / 1024 / 1024).toFixed(1)}MB blob`);
+    // Add global timeline
+    const controlsDiv = document.querySelector('.video-controls');
+    _renderGaplessTimeline(controlsDiv, g, _gaplessTimelineClick);
+
+    // Start timeline update loop
+    if (_gaplessRAF) cancelAnimationFrame(_gaplessRAF);
+    _gaplessRAF = requestAnimationFrame(_gaplessTimelineLoop);
+
+    console.log(`[Gapless] Single-view playback initialized with ${probeResult.blobUrls.length} chunks`);
   } catch (error) {
-    console.error('Error downloading chunks:', error);
+    console.error('[Gapless] Error:', error);
     videoLoading.innerHTML = `
       <div style="text-align: center; color: #f44336;">
         <div style="font-size: 14px; font-weight: 600;">Download failed</div>
@@ -642,6 +946,31 @@ async function forcePlayRawChunks() {
 }
 
 // Trigger compilation from single-view player
+// Format compile progress from status data into a human-readable string
+function _formatCompileProgress(statusData) {
+  const devices = statusData.devices || {};
+  const parts = [];
+  for (const [dt, info] of Object.entries(devices)) {
+    if (info.status === 'done' || info.status === 'skipped') continue;
+    if (info.status === 'compiling' && info.progress) {
+      const p = info.progress;
+      const phaseLabel = { download: 'Downloading', transcode: 'Transcoding', concat: 'Combining', upload: 'Uploading' }[p.phase] || p.phase;
+      if (p.total > 1) {
+        parts.push(`${dt}: ${phaseLabel} ${p.current}/${p.total}`);
+      } else {
+        parts.push(`${dt}: ${phaseLabel}...`);
+      }
+    } else if (info.status === 'queued') {
+      parts.push(`${dt}: queued (${info.chunks} chunks)`);
+    } else if (info.status === 'error') {
+      parts.push(`${dt}: failed`);
+    } else {
+      parts.push(`${dt}: ${info.status}`);
+    }
+  }
+  return parts.join(' | ') || 'Compiling...';
+}
+
 async function singleViewCompile(sessionId, button) {
   button.disabled = true;
   button.textContent = 'Starting compilation...';
@@ -663,11 +992,39 @@ async function singleViewCompile(sessionId, button) {
       return;
     }
 
-    button.textContent = 'Compiling... (this may take a few minutes)';
+    button.textContent = 'Compiling...';
+    const svPollStart = Date.now();
+    let svNotStartedCount = 0;
     const pollId = setInterval(async () => {
       try {
+        const elapsed = Date.now() - svPollStart;
+
+        if (elapsed > COMPILE_POLL_TIMEOUT_MS) {
+          clearInterval(pollId);
+          button.textContent = 'Timed out — try Download & Play instead';
+          button.style.background = '#f44336';
+          button.disabled = false;
+          button.onclick = () => singleViewCompile(sessionId, button);
+          return;
+        }
+
         const statusResp = await fetch(`/api/compile-status?sessionId=${encodeURIComponent(sessionId)}`);
         const statusData = await statusResp.json();
+
+        if (statusData.status === 'not_started') {
+          svNotStartedCount++;
+          if (svNotStartedCount >= 3) {
+            clearInterval(pollId);
+            button.textContent = 'Server restarted — click to retry';
+            button.style.background = '#ff9800';
+            button.disabled = false;
+            button.onclick = () => singleViewCompile(sessionId, button);
+            return;
+          }
+          return;
+        }
+        svNotStartedCount = 0;
+
         if (statusData.status === 'done') {
           clearInterval(pollId);
           button.textContent = 'Done! Reloading...';
@@ -675,16 +1032,22 @@ async function singleViewCompile(sessionId, button) {
           setTimeout(() => openVideoPlayer(sessionId, currentDevice, document.getElementById('videoPlayerTitle').textContent.split(' - ')[0]), 1500);
         } else if (statusData.status === 'error') {
           clearInterval(pollId);
-          button.textContent = 'Compilation failed — click to retry';
+          const errDevices = Object.entries(statusData.devices || {}).filter(([,d]) => d.status === 'error').map(([dt,d]) => `${dt}: ${d.error}`);
+          button.textContent = 'Failed — click to retry';
+          button.title = errDevices.join('; ') || 'Unknown error';
           button.style.background = '#f44336';
           button.disabled = false;
+          button.onclick = () => singleViewCompile(sessionId, button);
+        } else {
+          button.textContent = _formatCompileProgress(statusData) + ` (${_fmtElapsed(elapsed)})`;
         }
       } catch (e) { console.error('Poll error:', e); }
-    }, 5000);
+    }, COMPILE_POLL_INTERVAL_MS);
   } catch (err) {
     button.textContent = 'Failed — click to retry';
     button.style.background = '#f44336';
     button.disabled = false;
+    button.onclick = () => singleViewCompile(sessionId, button);
   }
 }
 
@@ -836,12 +1199,27 @@ function playPreviousChunk() {
 }
 
 function jumpToChunk(index) {
-  playChunk(index);
+  if (_gapless && index < _gapless.blobUrls.length) {
+    _gaplessSeek(_gapless, _gapless.cumulative[index]);
+  } else {
+    playChunk(index);
+  }
 }
 
 function closeVideoPlayer() {
   const modal = document.getElementById('videoPlayerModal');
   modal.classList.remove('active');
+
+  // Clean up gapless playback state
+  if (_gaplessRAF) { cancelAnimationFrame(_gaplessRAF); _gaplessRAF = null; }
+  if (_gapless) {
+    _gaplessCleanup(_gapless);
+    _gapless = null;
+  }
+
+  // Remove global timeline
+  const timeline = document.getElementById('gaplessTimelineContainer');
+  if (timeline) timeline.remove();
 
   // Clean up listeners and preload cache
   _cleanupChunkListeners();
@@ -851,13 +1229,24 @@ function closeVideoPlayer() {
   }
   _preloadedBlobs = {};
 
-  // Stop video
+  // Stop video A
   if (videoElement) {
     videoElement.pause();
     videoElement.src = '';
     videoElement.onloadeddata = null;
     videoElement.onerror = null;
     videoElement.onended = null;
+  }
+
+  // Stop video B
+  const videoB = document.getElementById('chunkVideoB');
+  if (videoB) {
+    videoB.pause();
+    videoB.src = '';
+    videoB.style.display = 'none';
+    videoB.onloadeddata = null;
+    videoB.onerror = null;
+    videoB.onended = null;
   }
 
   // Reset prev/next button visibility
@@ -877,7 +1266,13 @@ function closeVideoPlayer() {
 // Playback speed control for single-view player
 function setPlaybackSpeed(rate) {
   rate = parseFloat(rate);
-  if (videoElement) videoElement.playbackRate = rate;
+  if (_gapless) {
+    _gapless.playbackRate = rate;
+    _gapless.activeEl.playbackRate = rate;
+    _gapless.standbyEl.playbackRate = rate;
+  } else if (videoElement) {
+    videoElement.playbackRate = rate;
+  }
 }
 
 
@@ -1278,17 +1673,8 @@ async function compileRecording(sessionId, button, force) {
         }
         notStartedCount = 0;
 
-        // Update button with progress + elapsed time
-        const devices = statusResult.devices || {};
-        const parts = [];
-        for (const [dt, info] of Object.entries(devices)) {
-          if (info.status === 'compiling') parts.push(`${dt}: compiling ${info.chunks} chunks`);
-          else if (info.status === 'queued') parts.push(`${dt}: queued (${info.chunks})`);
-          else if (info.status === 'done') parts.push(`${dt}: done`);
-          else if (info.status === 'error') parts.push(`${dt}: ERROR ${info.error || ''}`);
-        }
-        const progressText = parts.length > 0 ? parts.join(' | ') : 'Compiling...';
-        button.textContent = `${progressText} (${_fmtElapsed(elapsed)})`;
+        // Update button with granular progress + elapsed time
+        button.textContent = `${_formatCompileProgress(statusResult)} (${_fmtElapsed(elapsed)})`;
 
         if (statusResult.status === 'done' || statusResult.status === 'error') {
           clearInterval(pollInterval);
@@ -1634,15 +2020,7 @@ async function mvTriggerCompile(sessionId, button) {
           button.disabled = false;
           button.onclick = () => mvTriggerCompile(sessionId, button);
         } else {
-          // Show progress with elapsed time
-          const devices = statusData.devices || {};
-          const parts = Object.entries(devices).map(([dt, info]) => {
-            if (info.status === 'compiling') return `${dt}: compiling`;
-            if (info.status === 'done') return `${dt}: done`;
-            if (info.status === 'queued') return `${dt}: queued`;
-            return `${dt}: ${info.status}`;
-          });
-          button.textContent = (parts.join(' | ') || 'Compiling...') + ` (${_fmtElapsed(elapsed)})`;
+          button.textContent = _formatCompileProgress(statusData) + ` (${_fmtElapsed(elapsed)})`;
         }
       } catch (e) {
         console.error('[MVP] Poll error:', e);
@@ -1657,7 +2035,6 @@ async function mvTriggerCompile(sessionId, button) {
   }
 }
 
-// Download all raw chunks, concatenate in browser, and play as single video in multi-view
 // Force-recompile from error overlay (uses force=true to delete corrupted combined videos)
 async function mvForceRecompile(sessionId, button) {
   button.disabled = true;
@@ -1735,10 +2112,7 @@ async function mvForceRecompile(sessionId, button) {
           button.disabled = false;
           button.onclick = () => mvForceRecompile(sessionId, button);
         } else {
-          // Show per-device progress with elapsed
-          const devices = sd.devices || {};
-          const parts = Object.entries(devices).map(([dt, info]) => `${dt}: ${info.status}`);
-          button.textContent = (parts.length ? parts.join(' | ') : 'Recompiling...') + ` (${_fmtElapsed(elapsed)})`;
+          button.textContent = _formatCompileProgress(sd) + ` (${_fmtElapsed(elapsed)})`;
         }
       } catch (e) { console.error('[MVP] Poll error:', e); }
     }, COMPILE_POLL_INTERVAL_MS);
@@ -1750,7 +2124,7 @@ async function mvForceRecompile(sessionId, button) {
   }
 }
 
-// Download all raw chunks, concatenate in browser, and play as single video in multi-view
+// Download all raw chunks and play gaplessly using dual-video swap in multi-view
 async function mvDownloadAndPlay(deviceType, button) {
   const cap = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
   const box = document.getElementById(`mv${cap}`);
@@ -1778,37 +2152,48 @@ async function mvDownloadAndPlay(deviceType, button) {
       device.chunks = chunks;
       console.log(`[MVP][${deviceType}] Got ${chunks.length} raw chunks`);
     }
-    const blobs = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const response = await fetch(chunks[i].downloadUrl);
-      if (!response.ok) throw new Error(`Chunk ${i + 1} failed (${response.status})`);
-      blobs.push(await response.blob());
-      if (button) button.textContent = `Downloading ${i + 1}/${chunks.length}...`;
-    }
 
-    const fullBlob = new Blob(blobs, { type: 'video/webm' });
-    const url = URL.createObjectURL(fullBlob);
+    // Download all chunks and probe durations
+    const probeResult = await _downloadAndProbeChunks(
+      chunks,
+      (done, total) => {
+        if (button) button.textContent = `Downloading ${done}/${total}...`;
+      },
+      () => {
+        if (button) button.textContent = 'Preparing playback...';
+      }
+    );
 
     // Remove the compile overlay
     const overlay = box.querySelector('.mv-compile-overlay');
     if (overlay) overlay.remove();
 
-    // Mark as playing
+    // Get the two video elements for this device
+    const videoA = document.getElementById(`mv${cap}Video`);
+    const videoB = document.getElementById(`mv${cap}VideoB`);
+
+    // Initialize gapless playback for this device
+    const g = _initGaplessPlayback(videoA, videoB, probeResult);
+    const speed = parseFloat(document.getElementById('mvPlaybackSpeed')?.value || '1');
+    g.playbackRate = speed;
+    videoA.playbackRate = speed;
+
+    // Store gapless state in the device
+    device.gapless = g;
     device.needsCompile = false;
-    device.isCombined = true; // Treat the concatenated blob like a combined video
+    device.isCombined = true; // Treat as combined for timeline/sync purposes
+    device.video = videoA; // Active video reference
 
-    if (label) label.textContent = `${cap} (combined in browser)`;
-
-    // Play the concatenated blob
-    const video = device.video;
-    video.src = url;
-    video.load();
-    video.onloadeddata = () => {
-      box.classList.remove('loading');
-      video.play().catch(e => console.warn(`[MVP][${deviceType}] Autoplay blocked:`, e.message));
+    // Track which element is active so sync can find the right one
+    g.onChunkChange = (idx) => {
+      device.video = g.activeEl;
+      console.log(`[MVP][${deviceType}] Chunk ${idx + 1} playing`);
     };
 
-    console.log(`[MVP][${deviceType}] Concatenated ${blobs.length} chunks into ${(fullBlob.size / 1024 / 1024).toFixed(1)}MB blob`);
+    if (label) label.textContent = `${cap} (${chunks.length} chunks, gapless)`;
+    box.classList.remove('loading');
+
+    console.log(`[MVP][${deviceType}] Gapless playback initialized with ${probeResult.blobUrls.length} chunks`);
   } catch (error) {
     console.error(`[MVP][${deviceType}] Download & play error:`, error);
     if (button) {
@@ -1886,8 +2271,9 @@ function spotlightVideo(deviceType) {
 function playAllVideos() {
   console.log(`[MVP] Playing all videos`);
   for (const [dt, device] of Object.entries(mvState.devices)) {
-    if (device.video && device.video.src) {
-      device.video.play().catch(e => console.warn(`[MVP][${dt}] Play failed:`, e.message));
+    const v = device.gapless ? device.gapless.activeEl : device.video;
+    if (v && v.src) {
+      v.play().catch(e => console.warn(`[MVP][${dt}] Play failed:`, e.message));
     }
   }
 }
@@ -1895,7 +2281,8 @@ function playAllVideos() {
 function pauseAllVideos() {
   console.log(`[MVP] Pausing all videos`);
   for (const device of Object.values(mvState.devices)) {
-    if (device.video) device.video.pause();
+    const v = device.gapless ? device.gapless.activeEl : device.video;
+    if (v) v.pause();
   }
 }
 
@@ -1903,33 +2290,32 @@ function syncAllVideos() {
   console.log(`[MVP] Syncing videos to ${mvState.spotlight}`);
 
   const refDevice = mvState.devices[mvState.spotlight];
-  if (!refDevice || !refDevice.video) {
+  if (!refDevice) {
     console.error(`[MVP] No reference device`);
     return;
   }
 
   const refStart = refDevice.startTime;
-  const refTime = refDevice.video.currentTime;
+  const refTime = _mvDeviceCurrentTime(refDevice);
 
   for (const [dt, device] of Object.entries(mvState.devices)) {
-    if (dt === mvState.spotlight || !device.video) continue;
+    if (dt === mvState.spotlight || device.needsCompile) continue;
 
     if (refStart && device.startTime) {
-      // Real timestamp sync
       const offsetSec = (device.startTime - refStart) / 1000;
       const targetTime = refTime - offsetSec;
 
       if (targetTime >= 0) {
-        device.video.currentTime = targetTime;
+        _mvDeviceSeekTo(device, targetTime);
         console.log(`[MVP][${dt}] Synced to ${targetTime.toFixed(1)}s (offset: ${offsetSec.toFixed(1)}s)`);
       } else {
-        device.video.currentTime = 0;
-        device.video.pause();
+        _mvDeviceSeekTo(device, 0);
+        const v = device.gapless ? device.gapless.activeEl : device.video;
+        if (v) v.pause();
         console.log(`[MVP][${dt}] Not started yet (offset: ${offsetSec.toFixed(1)}s)`);
       }
     } else {
-      // Fallback
-      device.video.currentTime = refTime;
+      _mvDeviceSeekTo(device, refTime);
       console.log(`[MVP][${dt}] Synced to ${refTime.toFixed(1)}s (no timestamp data)`);
     }
   }
@@ -1943,11 +2329,30 @@ function closeMultiView() {
 
   for (const [dt, device] of Object.entries(mvState.devices)) {
     mvCleanupDevice(dt);
+
+    // Clean up gapless state if present
+    if (device.gapless) {
+      _gaplessCleanup(device.gapless);
+      device.gapless = null;
+    }
+
     if (device.video) {
       device.video.pause();
       device.video.src = '';
       device.video.onloadeddata = null;
       device.video.onerror = null;
+    }
+
+    // Clean up video B element
+    const cap = dt.charAt(0).toUpperCase() + dt.slice(1);
+    const videoB = document.getElementById(`mv${cap}VideoB`);
+    if (videoB) {
+      videoB.pause();
+      videoB.src = '';
+      videoB.style.display = 'none';
+      videoB.onloadeddata = null;
+      videoB.onerror = null;
+      videoB.onended = null;
     }
   }
 
@@ -1971,7 +2376,10 @@ function _fmtTime(secs) {
 // Get the total duration of the spotlighted device's video
 function _mvTotalDuration() {
   const device = mvState.devices[mvState.spotlight];
-  if (!device || !device.video) return 0;
+  if (!device) return 0;
+  // Use gapless total duration if available
+  if (device.gapless) return device.gapless.totalDuration;
+  if (!device.video) return 0;
   const d = device.video.duration;
   return isFinite(d) ? d : 0;
 }
@@ -1979,13 +2387,24 @@ function _mvTotalDuration() {
 // Toggle play/pause for all videos
 function mvTogglePlayPause() {
   const device = mvState.devices[mvState.spotlight];
-  if (!device || !device.video) return;
+  if (!device) return;
 
-  if (device.video.paused) {
-    playAllVideos();
+  const activeVideo = device.gapless ? device.gapless.activeEl : device.video;
+  if (!activeVideo) return;
+
+  if (activeVideo.paused) {
+    // Play all devices
+    for (const [dt, dev] of Object.entries(mvState.devices)) {
+      const v = dev.gapless ? dev.gapless.activeEl : dev.video;
+      if (v && v.src) v.play().catch(e => console.warn(`[MVP][${dt}] Play failed:`, e.message));
+    }
     document.getElementById('mvPlayPauseBtn').textContent = '⏸';
   } else {
-    pauseAllVideos();
+    // Pause all devices
+    for (const dev of Object.values(mvState.devices)) {
+      const v = dev.gapless ? dev.gapless.activeEl : dev.video;
+      if (v) v.pause();
+    }
     document.getElementById('mvPlayPauseBtn').textContent = '▶';
   }
 }
@@ -1994,7 +2413,13 @@ function mvTogglePlayPause() {
 function mvSetSpeed(speed) {
   const rate = parseFloat(speed);
   for (const device of Object.values(mvState.devices)) {
-    if (device.video) device.video.playbackRate = rate;
+    if (device.gapless) {
+      device.gapless.playbackRate = rate;
+      device.gapless.activeEl.playbackRate = rate;
+      device.gapless.standbyEl.playbackRate = rate;
+    } else if (device.video) {
+      device.video.playbackRate = rate;
+    }
   }
   console.log(`[MVP] Playback speed set to ${rate}x`);
 }
@@ -2006,13 +2431,13 @@ function mvSeekFromClick(event) {
   const pct = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
 
   const device = mvState.devices[mvState.spotlight];
-  if (!device || !device.video) return;
+  if (!device) return;
 
   const total = _mvTotalDuration();
   if (total <= 0) return;
 
   const targetTime = pct * total;
-  device.video.currentTime = targetTime;
+  _mvDeviceSeekTo(device, targetTime);
 
   // Sync other devices to the new position
   _mvContinuousSync(targetTime);
@@ -2066,13 +2491,29 @@ function _mvRenderChunkMarkers(deviceType) {
   }
 }
 
+// Get the current playback time for a device, accounting for gapless state
+function _mvDeviceCurrentTime(device) {
+  if (device.gapless) return _gaplessGlobalTime(device.gapless);
+  if (device.video) return device.video.currentTime || 0;
+  return 0;
+}
+
+// Seek a device to a target time, accounting for gapless state
+function _mvDeviceSeekTo(device, targetTime) {
+  if (device.gapless) {
+    _gaplessSeek(device.gapless, targetTime);
+  } else if (device.video) {
+    device.video.currentTime = targetTime;
+  }
+}
+
 // Continuous sync — keep slave devices aligned with the master
 function _mvContinuousSync(masterTime) {
   const refDevice = mvState.devices[mvState.spotlight];
   if (!refDevice) return;
 
   const refStart = refDevice.startTime;
-  const time = masterTime !== undefined ? masterTime : (refDevice.video ? refDevice.video.currentTime : 0);
+  const time = masterTime !== undefined ? masterTime : _mvDeviceCurrentTime(refDevice);
 
   for (const [dt, device] of Object.entries(mvState.devices)) {
     if (dt === mvState.spotlight || !device.video || device.needsCompile) continue;
@@ -2091,16 +2532,21 @@ function _mvContinuousSync(masterTime) {
     }
 
     // Only correct if drift > 0.5s to avoid constant micro-seeks
-    const drift = Math.abs(device.video.currentTime - targetTime);
+    const currentTime = _mvDeviceCurrentTime(device);
+    const drift = Math.abs(currentTime - targetTime);
     if (drift > 0.5) {
-      device.video.currentTime = targetTime;
+      _mvDeviceSeekTo(device, targetTime);
     }
 
-    // Match play state
-    if (!refDevice.video.paused && device.video.paused && targetTime >= 0) {
-      device.video.play().catch(() => {});
-    } else if (refDevice.video.paused && !device.video.paused) {
-      device.video.pause();
+    // Match play state — use the reference device's active element
+    const refVideo = refDevice.gapless ? refDevice.gapless.activeEl : refDevice.video;
+    const slaveVideo = device.gapless ? device.gapless.activeEl : device.video;
+    if (refVideo && slaveVideo) {
+      if (!refVideo.paused && slaveVideo.paused && targetTime >= 0) {
+        slaveVideo.play().catch(() => {});
+      } else if (refVideo.paused && !slaveVideo.paused) {
+        slaveVideo.pause();
+      }
     }
   }
 }
@@ -2111,8 +2557,8 @@ function _mvUpdateLoop() {
   if (!mvState.isActive) { _mvUpdateRAF = null; return; }
 
   const device = mvState.devices[mvState.spotlight];
-  if (device && device.video && !isNaN(device.video.currentTime)) {
-    const t = device.video.currentTime;
+  if (device && (device.video || device.gapless)) {
+    const t = _mvDeviceCurrentTime(device);
     const total = _mvTotalDuration();
     const pct = total > 0 ? (t / total) * 100 : 0;
 
@@ -2128,7 +2574,8 @@ function _mvUpdateLoop() {
 
     // Update play/pause button state
     const ppBtn = document.getElementById('mvPlayPauseBtn');
-    if (ppBtn) ppBtn.textContent = device.video.paused ? '▶' : '⏸';
+    const activeVid = device.gapless ? device.gapless.activeEl : device.video;
+    if (ppBtn && activeVid) ppBtn.textContent = activeVid.paused ? '▶' : '⏸';
 
     // Continuous sync every frame
     _mvContinuousSync();
@@ -2136,11 +2583,16 @@ function _mvUpdateLoop() {
 
   // Update per-device progress bars
   for (const [dt, dev] of Object.entries(mvState.devices)) {
-    if (!dev.video || dev.needsCompile) continue;
+    if (dev.needsCompile) continue;
     const bar = document.getElementById(`mvBar${dt.charAt(0).toUpperCase() + dt.slice(1)}`);
     if (bar) {
-      const d = dev.video.duration;
-      const pct = (isFinite(d) && d > 0) ? (dev.video.currentTime / d) * 100 : 0;
+      let pct = 0;
+      if (dev.gapless) {
+        pct = dev.gapless.totalDuration > 0 ? (_gaplessGlobalTime(dev.gapless) / dev.gapless.totalDuration) * 100 : 0;
+      } else if (dev.video) {
+        const d = dev.video.duration;
+        pct = (isFinite(d) && d > 0) ? (dev.video.currentTime / d) * 100 : 0;
+      }
       bar.style.width = `${pct}%`;
     }
   }
@@ -2176,7 +2628,7 @@ closeMultiView = function() {
 function _mvKeyHandler(e) {
   if (!mvState.isActive) return;
   const device = mvState.devices[mvState.spotlight];
-  if (!device || !device.video) return;
+  if (!device) return;
 
   switch (e.key) {
     case ' ':
@@ -2185,13 +2637,22 @@ function _mvKeyHandler(e) {
       break;
     case 'ArrowLeft':
       e.preventDefault();
-      device.video.currentTime = Math.max(0, device.video.currentTime - (e.shiftKey ? 30 : 5));
-      _mvContinuousSync();
+      {
+        const curTime = _mvDeviceCurrentTime(device);
+        const seekTo = Math.max(0, curTime - (e.shiftKey ? 30 : 5));
+        _mvDeviceSeekTo(device, seekTo);
+        _mvContinuousSync();
+      }
       break;
     case 'ArrowRight':
       e.preventDefault();
-      device.video.currentTime = Math.min(device.video.duration || 0, device.video.currentTime + (e.shiftKey ? 30 : 5));
-      _mvContinuousSync();
+      {
+        const curTime = _mvDeviceCurrentTime(device);
+        const total = _mvTotalDuration();
+        const seekTo = Math.min(total, curTime + (e.shiftKey ? 30 : 5));
+        _mvDeviceSeekTo(device, seekTo);
+        _mvContinuousSync();
+      }
       break;
   }
 }

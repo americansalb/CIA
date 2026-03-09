@@ -71,7 +71,10 @@ async function processQueue() {
   console.log(`[compile] START ${sessionId}/${deviceType} (${chunks.length} chunks, ${compileQueue.length} queued)`);
 
   const status = compileStatus.get(sessionId);
-  if (status) status.devices[deviceType].status = 'compiling';
+  if (status) {
+    status.devices[deviceType].status = 'compiling';
+    status.devices[deviceType].progress = { phase: 'starting', current: 0, total: chunks.length };
+  }
 
   // Safety timeout scales with chunk count to prevent killing long compilations
   const timeoutMs = getCompileTimeout(chunks.length);
@@ -86,8 +89,15 @@ async function processQueue() {
     processQueue();
   }, timeoutMs);
 
+  // Progress callback — updates status map in real-time
+  const onProgress = ({ phase, current, total, detail }) => {
+    if (status && status.devices[deviceType]) {
+      status.devices[deviceType].progress = { phase, current, total, detail };
+    }
+  };
+
   try {
-    const result = await combineChunkFiles(chunks, folderId, deviceType, email, studentId);
+    const result = await combineChunkFiles(chunks, folderId, deviceType, email, studentId, onProgress);
     clearTimeout(timeoutId);
     if (status) {
       if (result.success) {
