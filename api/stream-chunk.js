@@ -21,12 +21,12 @@ module.exports = async (req, res) => {
     });
 
     const mimeType = fileMetadata.data.mimeType || 'video/webm';
-    const fileSize = fileMetadata.data.size;
+    const fileSize = parseInt(fileMetadata.data.size, 10) || null;
 
     // Handle range requests for video seeking
     const range = req.headers.range;
 
-    if (range) {
+    if (range && fileSize) {
       const parts = range.replace(/bytes=/, '').split('-');
       const start = parseInt(parts[0], 10);
       const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
@@ -52,15 +52,22 @@ module.exports = async (req, res) => {
         },
       });
 
+      driveResponse.data.on('error', (err) => {
+        console.error('Drive stream error (range):', err.message);
+        if (!res.headersSent) res.status(500).end();
+        else res.end();
+      });
       driveResponse.data.pipe(res);
     } else {
       // Stream entire file
-      res.writeHead(200, {
+      const headers = {
         'Content-Type': mimeType,
-        'Content-Length': fileSize,
-        'Accept-Ranges': 'bytes',
+        'Accept-Ranges': fileSize ? 'bytes' : 'none',
         'Cache-Control': 'public, max-age=3600',
-      });
+      };
+      if (fileSize) headers['Content-Length'] = fileSize;
+
+      res.writeHead(200, headers);
 
       const driveResponse = await drive.files.get({
         fileId: fileId,
@@ -70,6 +77,11 @@ module.exports = async (req, res) => {
         responseType: 'stream',
       });
 
+      driveResponse.data.on('error', (err) => {
+        console.error('Drive stream error:', err.message);
+        if (!res.headersSent) res.status(500).end();
+        else res.end();
+      });
       driveResponse.data.pipe(res);
     }
   } catch (error) {

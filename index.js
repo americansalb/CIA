@@ -11,9 +11,17 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    // Prevent browsers from caching JS files — ensures new deploys take effect immediately
+    if (filePath.endsWith('.js')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  }
+}));
 
 // API Routes
+app.get('/api/version', (req, res) => res.json({ version: '2.0.0', build: 'video-player-overhaul' }));
 app.get('/api/health', require('./api/health'));
 app.post('/api/validate-student', require('./api/validate-student'));
 app.post('/api/validate-admin', require('./api/validate-admin'));
@@ -59,6 +67,7 @@ app.get('/proctor', (req, res) => {
 
 // Socket.io for live monitoring and WebRTC signaling
 const { setSession, getSession, hasSession, deleteSession, getAllSessions, updateSession } = require('./utils/redis-client');
+const { triggerCompile } = require('./api/compile-recording');
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
@@ -157,9 +166,20 @@ io.on('connection', (socket) => {
 
     // Remove from active sessions if student
     if (socket.role === 'student' && socket.sessionId) {
-      await deleteSession(socket.sessionId);
+      const sessionId = socket.sessionId;
+
+      await deleteSession(sessionId);
       const sessions = await getAllSessions();
       io.emit('active-sessions', sessions);
+
+      // Auto-compile: trigger compilation through the serial queue after a delay
+      // to allow any in-flight chunk uploads to complete
+      setTimeout(() => {
+        console.log(`[auto-compile] Student disconnected, triggering compilation for ${sessionId}`);
+        triggerCompile(sessionId).catch(err => {
+          console.error('[auto-compile] Failed:', err.message);
+        });
+      }, 10000); // 10s delay for last chunks to finish uploading
     }
   });
 });

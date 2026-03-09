@@ -2,6 +2,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 const { downloadFile, uploadFile, deleteFile } = require('./drive-helper');
 const { getDrive } = require('./google-auth');
 
@@ -12,6 +13,30 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 const TEMP_DIR = path.join(__dirname, '..', 'temp');
 if (!fs.existsSync(TEMP_DIR)) {
   fs.mkdirSync(TEMP_DIR, { recursive: true });
+}
+
+// Minimum free disk space required to start compilation (500 MB)
+const MIN_FREE_DISK_BYTES = 500 * 1024 * 1024;
+
+/**
+ * Check available disk space on the temp directory's drive.
+ * Returns free bytes or null if unable to determine.
+ */
+function getFreeDiskSpace() {
+  try {
+    if (process.platform === 'win32') {
+      const drive = path.resolve(TEMP_DIR).substring(0, 2);
+      const output = execSync(`wmic logicaldisk where "DeviceID='${drive}'" get FreeSpace /format:value`, { encoding: 'utf8' });
+      const match = output.match(/FreeSpace=(\d+)/);
+      return match ? parseInt(match[1]) : null;
+    } else {
+      const output = execSync(`df -B1 "${TEMP_DIR}" | tail -1 | awk '{print $4}'`, { encoding: 'utf8' });
+      return parseInt(output.trim()) || null;
+    }
+  } catch (e) {
+    console.warn('[video-converter] Could not check disk space:', e.message);
+    return null; // Proceed anyway if we can't check
+  }
 }
 
 /**
@@ -146,6 +171,14 @@ async function combineChunks(sessionFolderId, deviceType, studentEmail, studentI
   const outputPath = path.join(workDir, 'combined_output.mp4');
 
   try {
+    // Pre-check: ensure enough disk space
+    const freeSpace = getFreeDiskSpace();
+    if (freeSpace !== null && freeSpace < MIN_FREE_DISK_BYTES) {
+      const freeMB = (freeSpace / 1024 / 1024).toFixed(0);
+      console.error(`[${combineId}] Insufficient disk space: ${freeMB}MB free`);
+      return { success: false, error: `Insufficient disk space (${freeMB}MB free). Need at least 500MB.` };
+    }
+
     // Step 1: Get all chunk files from the session folder
     const drive = await getDrive();
     const filesResponse = await drive.files.list({
@@ -182,53 +215,44 @@ async function combineChunks(sessionFolderId, deviceType, studentEmail, studentI
       chunkFiles.push(chunkPath);
     }
 
-    console.log(`[${combineId}] All chunks downloaded, creating concat list...`);
+    console.log(`[${combineId}] All chunks downloaded, starting two-pass transcode...`);
 
-    // Step 3: Create concat list file for ffmpeg
-    const concatContent = chunkFiles.map(f => `file '${f}'`).join('\n');
+    // PASS 1: Transcode each chunk individually to MPEG-TS (low memory)
+    const tsFiles = [];
+    console.log(`[${combineId}] Pass 1: Transcoding ${chunkFiles.length} chunks to TS...`);
+    const pass1Start = Date.now();
+    for (let i = 0; i < chunkFiles.length; i++) {
+      const tsPath = path.join(workDir, `chunk_${String(i).padStart(4, '0')}.ts`);
+      await transcodeChunkToTS(chunkFiles[i], tsPath, combineId, i, chunkFiles.length);
+      tsFiles.push(tsPath);
+      // Delete original chunk to free disk space
+      try { fs.unlinkSync(chunkFiles[i]); } catch (e) { /* ignore */ }
+    }
+    console.log(`[${combineId}] Pass 1 done in ${((Date.now() - pass1Start) / 1000).toFixed(1)}s`);
+
+    // PASS 2: Concatenate TS files with stream copy to MP4
+    const concatContent = tsFiles.map(f => `file '${f}'`).join('\n');
     fs.writeFileSync(concatListPath, concatContent);
 
-    // Step 4: Concatenate and convert to seekable MP4
-    console.log(`[${combineId}] Concatenating and converting to MP4 (${chunks.length} chunks)...`);
-    let lastLogTime = Date.now();
+    console.log(`[${combineId}] Pass 2: Concatenating TS files to MP4...`);
+    const pass2Start = Date.now();
     await new Promise((resolve, reject) => {
       ffmpeg()
         .input(concatListPath)
-        .inputOptions([
-          '-f concat',
-          '-safe 0',
-          '-fflags +genpts',  // Generate new timestamps to fix freezing
-        ])
+        .inputOptions(['-f concat', '-safe 0'])
         .outputOptions([
-          '-c:v libx264',
-          '-preset ultrafast',
-          '-crf 28',
-          '-c:a aac',
-          '-b:a 128k',
+          '-c copy',
           '-movflags +faststart',
-          '-vsync cfr',        // Constant frame rate - fixes timing issues
-          '-r 30',             // Force 30fps output
-          '-avoid_negative_ts make_zero',  // Fix negative timestamps
+          '-avoid_negative_ts make_zero',
         ])
         .output(outputPath)
-        .on('start', (cmd) => {
-          console.log(`[${combineId}] FFmpeg started`);
-        })
-        .on('progress', (progress) => {
-          // Only log every 30 seconds to avoid spam (concat progress is unreliable)
-          const now = Date.now();
-          if (now - lastLogTime > 30000) {
-            lastLogTime = now;
-            const timemark = progress.timemark || 'processing';
-            console.log(`[${combineId}] Processing... timemark: ${timemark}`);
-          }
-        })
+        .on('start', () => console.log(`[${combineId}] Pass 2 FFmpeg started`))
         .on('end', () => {
-          console.log(`[${combineId}] Concatenation complete`);
+          console.log(`[${combineId}] Pass 2 done in ${((Date.now() - pass2Start) / 1000).toFixed(1)}s`);
           resolve();
         })
         .on('error', (err) => {
-          console.error(`[${combineId}] FFmpeg error:`, err);
+          console.error(`[${combineId}] Pass 2 FFmpeg error:`, err);
           reject(err);
         })
         .run();
@@ -277,21 +301,65 @@ async function combineChunks(sessionFolderId, deviceType, studentEmail, studentI
 }
 
 /**
+ * Transcode a single chunk to MPEG-TS format.
+ * Each chunk is processed individually to keep memory usage low.
+ */
+function transcodeChunkToTS(inputPath, outputPath, combineId, index, total) {
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .outputOptions([
+        '-c:v libx264',
+        '-preset ultrafast',
+        '-crf 26',
+        '-vf', 'scale=-2:720',           // 720p — clear enough for identity verification
+        '-c:a aac',
+        '-b:a 96k',
+        '-ac 1',
+        '-r 24',
+        '-threads 1',
+        '-x264-params', 'rc-lookahead=0:ref=1:bframes=0',
+        '-f mpegts',
+      ])
+      .output(outputPath)
+      .on('start', () => {
+        if (index % 10 === 0 || index === total - 1) {
+          console.log(`[${combineId}] Transcoding chunk ${index + 1}/${total} to TS`);
+        }
+      })
+      .on('end', () => resolve())
+      .on('error', (err) => {
+        console.error(`[${combineId}] Chunk ${index + 1} transcode error:`, err.message);
+        reject(err);
+      })
+      .run();
+  });
+}
+
+/**
  * Combine pre-identified chunk files into a single video.
- * Unlike combineChunks which queries a single folder, this accepts an array
- * of {id, name} objects so it works across duplicate folders.
+ * Uses a two-pass approach to prevent memory exhaustion:
+ *   Pass 1: Transcode each chunk individually to MPEG-TS (low memory per chunk)
+ *   Pass 2: Concatenate TS files with stream copy to MP4 (fast, no re-encoding)
  */
 async function combineChunkFiles(chunkList, outputFolderId, deviceType, studentEmail, studentId) {
   const combineId = `combine_${Date.now()}`;
-  console.log(`[${combineId}] Starting chunk combination for ${deviceType} (${chunkList.length} chunks)`);
+  console.log(`[${combineId}] Starting two-pass chunk combination for ${deviceType} (${chunkList.length} chunks)`);
 
   const workDir = path.join(TEMP_DIR, combineId);
   fs.mkdirSync(workDir, { recursive: true });
 
   const localFiles = [];
-  const concatListPath = path.join(workDir, 'concat_list.txt');
+  const tsFiles = [];
 
   try {
+    // Pre-check: ensure enough disk space before starting
+    const freeSpace = getFreeDiskSpace();
+    if (freeSpace !== null && freeSpace < MIN_FREE_DISK_BYTES) {
+      const freeMB = (freeSpace / 1024 / 1024).toFixed(0);
+      console.error(`[${combineId}] Insufficient disk space: ${freeMB}MB free, need ${MIN_FREE_DISK_BYTES / 1024 / 1024}MB`);
+      return { success: false, error: `Insufficient disk space (${freeMB}MB free). Need at least 500MB.` };
+    }
+
     // Sort chunks by number
     chunkList.sort((a, b) => {
       const numA = parseInt(a.name.match(/chunk_(\d+)/)?.[1] || '0');
@@ -313,45 +381,47 @@ async function combineChunkFiles(chunkList, outputFolderId, deviceType, studentE
     }
     console.log(`[${combineId}] All ${chunkList.length} chunks downloaded in ${((Date.now() - dlStart) / 1000).toFixed(1)}s`);
 
-    // Create concat list
-    const concatContent = localFiles.map(f => `file '${f}'`).join('\n');
+    // PASS 1: Transcode each chunk individually to MPEG-TS
+    // This keeps memory low because only one chunk is being processed at a time
+    console.log(`[${combineId}] Pass 1: Transcoding each chunk to MPEG-TS...`);
+    const pass1Start = Date.now();
+    for (let i = 0; i < localFiles.length; i++) {
+      const tsPath = path.join(workDir, `chunk_${String(i).padStart(4, '0')}.ts`);
+      await transcodeChunkToTS(localFiles[i], tsPath, combineId, i, localFiles.length);
+      tsFiles.push(tsPath);
+
+      // Delete the original chunk after transcoding to free disk space
+      try { fs.unlinkSync(localFiles[i]); } catch (e) { /* ignore */ }
+    }
+    console.log(`[${combineId}] Pass 1 done in ${((Date.now() - pass1Start) / 1000).toFixed(1)}s`);
+
+    // PASS 2: Concatenate TS files with stream copy (fast, no re-encoding, low memory)
+    const concatListPath = path.join(workDir, 'concat_list.txt');
+    const concatContent = tsFiles.map(f => `file '${f}'`).join('\n');
     fs.writeFileSync(concatListPath, concatContent);
 
-    // Transcode to seekable MP4 (stream copy doesn't work reliably with
-    // MediaRecorder WebM chunks — produces decode errors in browsers)
     const outputPath = path.join(workDir, 'combined_output.mp4');
-    console.log(`[${combineId}] Transcoding ${chunkList.length} chunks to MP4...`);
-    const ffStart = Date.now();
-    let lastLogTime = Date.now();
+    console.log(`[${combineId}] Pass 2: Concatenating ${tsFiles.length} TS files to MP4...`);
+    const pass2Start = Date.now();
     await new Promise((resolve, reject) => {
       ffmpeg()
         .input(concatListPath)
-        .inputOptions(['-f concat', '-safe 0', '-fflags +genpts'])
+        .inputOptions(['-f concat', '-safe 0'])
         .outputOptions([
-          '-c:v libx264',
-          '-preset ultrafast',
-          '-crf 30',
-          '-vf', 'scale=-2:480',        // 480p — keeps memory low on 512MB servers
-          '-c:a aac',
-          '-b:a 96k',
-          '-ac 1',                        // mono audio — saves memory
-          '-vsync cfr',
-          '-r 24',                        // 24fps — less frames to encode
-          '-threads 1',
-          '-x264-params', 'rc-lookahead=0:ref=1:bframes=0',  // minimal H264 buffers
+          '-c copy',                      // Stream copy — no re-encoding needed
+          '-movflags +faststart',         // Enable seeking from start for web playback
           '-avoid_negative_ts make_zero',
         ])
         .output(outputPath)
-        .on('start', () => console.log(`[${combineId}] FFmpeg transcode started`))
-        .on('progress', (progress) => {
-          const now = Date.now();
-          if (now - lastLogTime > 30000) {
-            lastLogTime = now;
-            console.log(`[${combineId}] Transcoding... timemark: ${progress.timemark || '?'}`);
-          }
+        .on('start', () => console.log(`[${combineId}] Pass 2 FFmpeg started`))
+        .on('end', () => {
+          console.log(`[${combineId}] Pass 2 done in ${((Date.now() - pass2Start) / 1000).toFixed(1)}s`);
+          resolve();
         })
-        .on('end', () => { console.log(`[${combineId}] Transcode done in ${((Date.now() - ffStart) / 1000).toFixed(1)}s`); resolve(); })
-        .on('error', (err) => { console.error(`[${combineId}] FFmpeg transcode error:`, err); reject(err); })
+        .on('error', (err) => {
+          console.error(`[${combineId}] Pass 2 FFmpeg error:`, err);
+          reject(err);
+        })
         .run();
     });
 

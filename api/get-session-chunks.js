@@ -27,11 +27,13 @@ module.exports = async (req, res) => {
   const log = (msg) => console.log(`[session-chunks ${Date.now() - t0}ms] ${msg}`);
 
   try {
-    const { sessionId, deviceType } = req.query;
+    const { sessionId, deviceType, raw } = req.query;
 
     if (!sessionId || !deviceType) {
       return res.status(400).json({ success: false, message: 'Session ID and device type are required' });
     }
+
+    const forceRaw = raw === 'true'; // Skip combined video detection
 
     log(`START sessionId=${sessionId} deviceType=${deviceType}`);
 
@@ -76,15 +78,19 @@ module.exports = async (req, res) => {
     }
     log(`Found ${allFiles.length} total files`);
 
-    // Look for COMBINED or FINAL videos only
-    // FINAL videos use abbreviated device type (m/p/s), COMBINED uses full name
+    // Look for properly compiled videos only:
+    // - COMBINED_* = FFmpeg concat output (seekable MP4)
+    // - _FINAL_CONVERTED_ = FFmpeg WebM-to-MP4 conversion (seekable MP4)
+    // NOTE: Raw _FINAL_ WebM blobs from MediaRecorder are NOT seekable
+    // and will stall after the first buffered segment. Do NOT treat them
+    // as combined videos — they need compilation first.
     const deviceAbbrev = deviceType[0]; // main->m, proctor->p, screen->s
     const combinedVideos = allFiles.filter(f =>
       f.name.includes(`COMBINED_${deviceType}`) ||
-      f.name.includes(`_${deviceAbbrev}_FINAL_`)
+      f.name.includes(`_${deviceAbbrev}_FINAL_CONVERTED_`)
     );
 
-    if (combinedVideos.length > 0) {
+    if (combinedVideos.length > 0 && !forceRaw) {
       combinedVideos.sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
       const video = combinedVideos[0];
       log(`Found combined/FINAL: ${video.name}`);

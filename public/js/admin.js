@@ -1,5 +1,6 @@
-// Admin panel script
-console.log('[Admin] admin.js script loaded at', new Date().toISOString());
+// Admin panel script — v2.0.0 (video-player-overhaul)
+const ADMIN_JS_VERSION = '2.0.0';
+console.log(`[Admin] admin.js v${ADMIN_JS_VERSION} loaded at`, new Date().toISOString());
 let adminEmail = null;
 let allRecordings = [];
 let practiceAttempts = [];
@@ -498,6 +499,7 @@ async function openVideoPlayer(sessionId, deviceType, studentEmail) {
   title.textContent = `${studentEmail} - ${deviceType === 'main' ? 'Main' : 'Proctor'} Camera`;
   modal.classList.add('active');
   videoLoading.style.display = 'block';
+  videoLoading.textContent = 'Loading...';
   videoElement.style.display = 'none';
 
   try {
@@ -505,33 +507,205 @@ async function openVideoPlayer(sessionId, deviceType, studentEmail) {
     const response = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
     const result = await response.json();
 
-    if (result.success && result.chunks.length > 0) {
+    if (!result.success || !result.chunks || result.chunks.length === 0) {
+      videoLoading.textContent = 'No video found for this recording';
+      return;
+    }
+
+    // If we have a combined/FINAL video, play directly with full seeking
+    if (result.hasCombinedVideo) {
+      const video = result.chunks[0];
       currentChunks = result.chunks;
 
-      // Update totals
-      document.getElementById('totalChunks').textContent = currentChunks.length;
-
-      // Build chunk list
-      chunkListContainer.innerHTML = currentChunks.map((chunk, index) => `
-        <div class="chunk-item ${index === 0 ? 'active' : ''}" id="chunk-item-${index}" onclick="jumpToChunk(${index})">
-          Chunk ${chunk.chunkNumber}
-          <div style="font-size: 11px; color: #888;">Click to play</div>
+      document.getElementById('totalChunks').textContent = '1 (combined)';
+      chunkListContainer.innerHTML = `
+        <div class="chunk-item active" style="background: #4caf50; color: white;">
+          Combined Video
+          <div style="font-size: 11px; opacity: 0.8;">Full seeking supported</div>
         </div>
-      `).join('');
+      `;
 
-      // Play first chunk
-      await playChunk(0);
-    } else {
-      videoLoading.textContent = 'No chunks found for this recording';
+      videoElement.src = video.downloadUrl;
+      videoElement.load();
+      videoElement.onloadeddata = () => {
+        videoLoading.style.display = 'none';
+        videoElement.style.display = 'block';
+        videoElement.play().catch(e => console.warn('Autoplay blocked:', e.message));
+      };
+      videoElement.onerror = () => {
+        videoLoading.textContent = 'Error loading video — try refreshing';
+      };
+      // Hide prev/next buttons for single combined video
+      document.getElementById('prevChunkBtn').style.display = 'none';
+      document.getElementById('nextChunkBtn').style.display = 'none';
+      document.getElementById('currentChunkNum').textContent = '1';
+      return;
     }
+
+    // Raw chunks only — show compilation prompt instead of crashing
+    currentChunks = result.chunks;
+    const chunkCount = result.chunks.length;
+
+    document.getElementById('totalChunks').textContent = chunkCount;
+    videoLoading.style.display = 'block';
+    videoLoading.innerHTML = `
+      <div style="text-align: center;">
+        <div style="font-size: 48px; margin-bottom: 16px;">🎬</div>
+        <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">${chunkCount} raw chunks found</div>
+        <div style="font-size: 13px; color: #aaa; margin-bottom: 20px;">
+          Raw chunks cannot be played smoothly. Compile them into a single video first.
+        </div>
+        <button id="singleViewCompileBtn" onclick="singleViewCompile('${sessionId}', this)" style="background: #ff9800; color: white; border: none; padding: 12px 32px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">
+          Compile Now
+        </button>
+        <div style="margin-top: 16px; border-top: 1px solid #333; padding-top: 16px;">
+          <button onclick="forcePlayRawChunks()" style="background: #2196f3; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;">
+            Download &amp; Play Now
+          </button>
+          <div style="font-size: 11px; color: #666; margin-top: 6px;">Downloads all chunks, combines in browser</div>
+        </div>
+      </div>
+    `;
+
+    // Build chunk list sidebar
+    chunkListContainer.innerHTML = currentChunks.map((chunk, index) => `
+      <div class="chunk-item" id="chunk-item-${index}" onclick="jumpToChunk(${index})">
+        Chunk ${chunk.chunkNumber}
+        <div style="font-size: 11px; color: #888;">Click to play</div>
+      </div>
+    `).join('');
+
   } catch (error) {
     console.error('Error loading chunks:', error);
     videoLoading.textContent = 'Error loading video chunks';
   }
 }
 
+// Download all raw chunks, concatenate in browser, and play as a single video.
+// MediaRecorder WebM chunks are contiguous slices of the output stream —
+// concatenating them reconstructs the original playable WebM.
+async function forcePlayRawChunks() {
+  const videoLoading = document.getElementById('videoLoading');
+
+  videoLoading.style.display = 'block';
+  videoLoading.innerHTML = `
+    <div style="text-align: center;">
+      <div style="font-size: 14px; font-weight: 600;">Downloading chunks...</div>
+      <div id="chunkDownloadProgress" style="font-size: 12px; color: #aaa; margin-top: 8px;">0 / ${currentChunks.length}</div>
+      <div style="width: 200px; height: 4px; background: #333; border-radius: 2px; margin: 12px auto;">
+        <div id="chunkDownloadBar" style="width: 0%; height: 100%; background: #2196f3; border-radius: 2px; transition: width 0.3s;"></div>
+      </div>
+    </div>
+  `;
+
+  try {
+    const blobs = [];
+    for (let i = 0; i < currentChunks.length; i++) {
+      const response = await fetch(currentChunks[i].downloadUrl);
+      if (!response.ok) throw new Error(`Chunk ${i + 1} download failed (${response.status})`);
+      blobs.push(await response.blob());
+
+      const progress = document.getElementById('chunkDownloadProgress');
+      const bar = document.getElementById('chunkDownloadBar');
+      if (progress) progress.textContent = `${i + 1} / ${currentChunks.length}`;
+      if (bar) bar.style.width = `${((i + 1) / currentChunks.length) * 100}%`;
+    }
+
+    const fullBlob = new Blob(blobs, { type: 'video/webm' });
+    const url = URL.createObjectURL(fullBlob);
+
+    videoLoading.style.display = 'none';
+    videoElement.style.display = 'block';
+    videoElement.src = url;
+    videoElement.load();
+    videoElement.play().catch(e => console.warn('Autoplay blocked:', e.message));
+
+    // Hide prev/next — single combined blob
+    document.getElementById('prevChunkBtn').style.display = 'none';
+    document.getElementById('nextChunkBtn').style.display = 'none';
+    document.getElementById('currentChunkNum').textContent = '1';
+    document.getElementById('totalChunks').textContent = '1 (combined)';
+
+    console.log(`[RawPlay] Concatenated ${blobs.length} chunks into ${(fullBlob.size / 1024 / 1024).toFixed(1)}MB blob`);
+  } catch (error) {
+    console.error('Error downloading chunks:', error);
+    videoLoading.innerHTML = `
+      <div style="text-align: center; color: #f44336;">
+        <div style="font-size: 14px; font-weight: 600;">Download failed</div>
+        <div style="font-size: 12px; color: #aaa; margin-top: 8px;">${error.message}</div>
+        <button onclick="forcePlayRawChunks()" style="margin-top: 12px; background: #2196f3; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+          Retry
+        </button>
+      </div>
+    `;
+  }
+}
+
+// Trigger compilation from single-view player
+async function singleViewCompile(sessionId, button) {
+  button.disabled = true;
+  button.textContent = 'Starting compilation...';
+  button.style.background = '#6c757d';
+
+  try {
+    const response = await fetch('/api/compile-recording', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, force: false }),
+    });
+    const result = await response.json();
+    if (!result.success) throw new Error(result.message);
+
+    if (result.status === 'done') {
+      button.textContent = 'Done! Reloading...';
+      button.style.background = '#4caf50';
+      setTimeout(() => openVideoPlayer(sessionId, currentDevice, document.getElementById('videoPlayerTitle').textContent.split(' - ')[0]), 1500);
+      return;
+    }
+
+    button.textContent = 'Compiling... (this may take a few minutes)';
+    const pollId = setInterval(async () => {
+      try {
+        const statusResp = await fetch(`/api/compile-status?sessionId=${encodeURIComponent(sessionId)}`);
+        const statusData = await statusResp.json();
+        if (statusData.status === 'done') {
+          clearInterval(pollId);
+          button.textContent = 'Done! Reloading...';
+          button.style.background = '#4caf50';
+          setTimeout(() => openVideoPlayer(sessionId, currentDevice, document.getElementById('videoPlayerTitle').textContent.split(' - ')[0]), 1500);
+        } else if (statusData.status === 'error') {
+          clearInterval(pollId);
+          button.textContent = 'Compilation failed — click to retry';
+          button.style.background = '#f44336';
+          button.disabled = false;
+        }
+      } catch (e) { console.error('Poll error:', e); }
+    }, 5000);
+  } catch (err) {
+    button.textContent = 'Failed — click to retry';
+    button.style.background = '#f44336';
+    button.disabled = false;
+  }
+}
+
+// Track active listeners for cleanup
+let _chunkListeners = {};
+let _chunkLoadId = 0; // Cancellation token for in-progress loads
+
+function _cleanupChunkListeners() {
+  if (videoElement && _chunkListeners) {
+    for (const [event, handler] of Object.entries(_chunkListeners)) {
+      videoElement.removeEventListener(event, handler);
+    }
+  }
+  _chunkListeners = {};
+}
+
 async function playChunk(index) {
   if (index < 0 || index >= currentChunks.length) return;
+
+  // Cancel any in-progress load
+  const loadId = ++_chunkLoadId;
 
   currentChunkIndex = index;
   const chunk = currentChunks[index];
@@ -552,36 +726,101 @@ async function playChunk(index) {
     if (i <= index) item.classList.add('loaded');
   });
 
+  // Clean up old listeners before loading new chunk
+  _cleanupChunkListeners();
+
   // Load video
   videoLoading.style.display = 'block';
   videoLoading.textContent = `Loading chunk ${index + 1}...`;
   videoElement.style.display = 'none';
 
   try {
-    // Set video source
-    videoElement.src = chunk.downloadUrl;
+    // Use preloaded blob URL if available, otherwise fall back to download URL
+    const preloadedUrl = _preloadedBlobs[index];
+    if (preloadedUrl) {
+      videoElement.src = preloadedUrl;
+      delete _preloadedBlobs[index]; // Consume it
+      console.log(`[Preload] Using cached blob for chunk ${index + 1}`);
+    } else {
+      videoElement.src = chunk.downloadUrl;
+    }
     videoElement.load();
 
-    // Wait for video to be ready
+    // Wait for video to be ready with proper cleanup
     await new Promise((resolve, reject) => {
-      videoElement.onloadeddata = resolve;
-      videoElement.onerror = reject;
+      const onLoaded = () => {
+        if (loadId !== _chunkLoadId) return; // Cancelled
+        resolve();
+      };
+      const onError = () => {
+        if (loadId !== _chunkLoadId) return; // Cancelled
+        reject(new Error(`Chunk ${index + 1} failed to load`));
+      };
+
+      _chunkListeners = { loadeddata: onLoaded, error: onError };
+      videoElement.addEventListener('loadeddata', onLoaded, { once: true });
+      videoElement.addEventListener('error', onError, { once: true });
     });
+
+    // Check if this load was cancelled while waiting
+    if (loadId !== _chunkLoadId) return;
 
     videoLoading.style.display = 'none';
     videoElement.style.display = 'block';
-    videoElement.play();
+    videoElement.play().catch(e => console.warn('Autoplay blocked:', e.message));
 
     // Auto-play next chunk when this one ends
-    videoElement.onended = () => {
+    const onEnded = () => {
       if (currentChunkIndex < currentChunks.length - 1) {
         playNextChunk();
       }
     };
+    _chunkListeners.ended = onEnded;
+    videoElement.addEventListener('ended', onEnded, { once: true });
+
+    // Preload next chunk
+    _preloadNextChunk(index + 1);
+
   } catch (error) {
+    if (loadId !== _chunkLoadId) return; // Cancelled
     console.error('Error playing chunk:', error);
-    videoLoading.textContent = `Error loading chunk ${index + 1}`;
+    videoLoading.textContent = `Error loading chunk ${index + 1} — `;
+
+    // Auto-skip to next chunk on error
+    if (index < currentChunks.length - 1) {
+      videoLoading.textContent += 'skipping to next...';
+      setTimeout(() => {
+        if (loadId === _chunkLoadId) playChunk(index + 1);
+      }, 1500);
+    } else {
+      videoLoading.textContent += 'last chunk';
+    }
   }
+}
+
+// Preload system for seamless chunk transitions
+let _preloadedBlobs = {}; // chunkIndex -> blobUrl
+const _MAX_PRELOAD_CACHE = 3;
+
+function _preloadNextChunk(nextIndex) {
+  if (nextIndex >= currentChunks.length) return;
+  if (_preloadedBlobs[nextIndex]) return; // Already preloaded
+
+  const chunk = currentChunks[nextIndex];
+  fetch(chunk.downloadUrl)
+    .then(r => r.blob())
+    .then(blob => {
+      // Evict old entries if cache is full
+      const keys = Object.keys(_preloadedBlobs).map(Number);
+      while (keys.length >= _MAX_PRELOAD_CACHE) {
+        const oldest = keys.shift();
+        URL.revokeObjectURL(_preloadedBlobs[oldest]);
+        delete _preloadedBlobs[oldest];
+      }
+      _preloadedBlobs[nextIndex] = URL.createObjectURL(blob);
+      console.log(`[Preload] Chunk ${nextIndex + 1} preloaded`);
+    })
+    .catch(e => console.warn(`[Preload] Chunk ${nextIndex + 1} failed:`, e.message));
 }
 
 function playNextChunk() {
@@ -604,16 +843,41 @@ function closeVideoPlayer() {
   const modal = document.getElementById('videoPlayerModal');
   modal.classList.remove('active');
 
+  // Clean up listeners and preload cache
+  _cleanupChunkListeners();
+  _chunkLoadId++;
+  for (const url of Object.values(_preloadedBlobs)) {
+    URL.revokeObjectURL(url);
+  }
+  _preloadedBlobs = {};
+
   // Stop video
   if (videoElement) {
     videoElement.pause();
     videoElement.src = '';
+    videoElement.onloadeddata = null;
+    videoElement.onerror = null;
+    videoElement.onended = null;
   }
+
+  // Reset prev/next button visibility
+  document.getElementById('prevChunkBtn').style.display = '';
+  document.getElementById('nextChunkBtn').style.display = '';
 
   currentChunks = [];
   currentChunkIndex = 0;
   currentSession = null;
   currentDevice = null;
+
+  // Reset speed selector
+  const speedSelect = document.getElementById('playbackSpeed');
+  if (speedSelect) speedSelect.value = '1';
+}
+
+// Playback speed control for single-view player
+function setPlaybackSpeed(rate) {
+  rate = parseFloat(rate);
+  if (videoElement) videoElement.playbackRate = rate;
 }
 
 
@@ -934,6 +1198,16 @@ window.switchTab = switchTab;
 // COMPILE RECORDING
 // ====================
 
+// Client-side poll timeout: stop polling after 5 minutes
+const COMPILE_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+const COMPILE_POLL_INTERVAL_MS = 5000;
+
+function _fmtElapsed(ms) {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  return m > 0 ? `${m}m ${s % 60}s` : `${s}s`;
+}
+
 async function compileRecording(sessionId, button, force) {
   console.log(`[Compile] Starting compile for session: ${sessionId}, force: ${!!force}`);
   button.disabled = true;
@@ -960,19 +1234,51 @@ async function compileRecording(sessionId, button, force) {
       return;
     }
 
-    // Start polling for status
+    // Start polling for status with timeout
     button.textContent = 'Compiling...';
     button.style.background = '#2196f3';
+    const pollStarted = Date.now();
+    let notStartedCount = 0;
 
     const pollInterval = setInterval(async () => {
       try {
+        const elapsed = Date.now() - pollStarted;
+
+        // Client-side timeout: give up polling after 5 minutes
+        if (elapsed > COMPILE_POLL_TIMEOUT_MS) {
+          clearInterval(pollInterval);
+          console.warn(`[Compile] Poll timeout after ${_fmtElapsed(elapsed)}`);
+          button.textContent = 'Timed out — click to retry';
+          button.style.background = '#f44336';
+          button.disabled = false;
+          button.onclick = () => compileRecording(sessionId, button, force);
+          return;
+        }
+
         const statusResp = await fetch(`/api/compile-status?sessionId=${encodeURIComponent(sessionId)}`);
         const statusResult = await statusResp.json();
-        console.log(`[Compile] Poll status:`, statusResult);
+        console.log(`[Compile] Poll status (${_fmtElapsed(elapsed)}):`, statusResult);
 
         if (!statusResult.success) return;
 
-        // Update button with progress
+        // Server restarted — status lost
+        if (statusResult.status === 'not_started') {
+          notStartedCount++;
+          if (notStartedCount >= 3) {
+            clearInterval(pollInterval);
+            console.warn('[Compile] Status lost (server restart). Stopping poll.');
+            button.textContent = 'Server restarted — click to retry';
+            button.style.background = '#ff9800';
+            button.disabled = false;
+            button.onclick = () => compileRecording(sessionId, button, force);
+            return;
+          }
+          button.textContent = `Waiting for server... (${_fmtElapsed(elapsed)})`;
+          return;
+        }
+        notStartedCount = 0;
+
+        // Update button with progress + elapsed time
         const devices = statusResult.devices || {};
         const parts = [];
         for (const [dt, info] of Object.entries(devices)) {
@@ -981,7 +1287,8 @@ async function compileRecording(sessionId, button, force) {
           else if (info.status === 'done') parts.push(`${dt}: done`);
           else if (info.status === 'error') parts.push(`${dt}: ERROR ${info.error || ''}`);
         }
-        button.textContent = parts.length > 0 ? parts.join(' | ') : 'Compiling...';
+        const progressText = parts.length > 0 ? parts.join(' | ') : 'Compiling...';
+        button.textContent = `${progressText} (${_fmtElapsed(elapsed)})`;
 
         if (statusResult.status === 'done' || statusResult.status === 'error') {
           clearInterval(pollInterval);
@@ -1000,7 +1307,7 @@ async function compileRecording(sessionId, button, force) {
       } catch (pollErr) {
         console.error('[Compile] Poll error:', pollErr);
       }
-    }, 5000); // Poll every 5 seconds
+    }, COMPILE_POLL_INTERVAL_MS);
 
   } catch (error) {
     console.error('[Compile] Error:', error);
@@ -1122,7 +1429,7 @@ async function mvLoadChunk(deviceType, chunkIndex, retryCount = 0) {
 
     // Add listeners using addEventListener (not onended=)
     video.addEventListener('canplay', onCanPlay, { once: true });
-    video.addEventListener('ended', onEnded); // Not once - stays for this chunk
+    video.addEventListener('ended', onEnded, { once: true }); // once: true prevents listener stacking
     video.addEventListener('error', onError, { once: true });
 
     // Set source and load
@@ -1152,30 +1459,364 @@ async function mvInitDevice(sessionId, deviceType) {
       return;
     }
 
-    // Store device state
+    // If we have a combined/FINAL video, play it directly as a single seekable file
+    if (data.hasCombinedVideo) {
+      const combinedChunk = data.chunks[0];
+      mvState.devices[deviceType] = {
+        video: video,
+        chunks: data.chunks,
+        currentIdx: 0,
+        startTime: data.createdTime ? new Date(data.createdTime).getTime() : null,
+        isCombined: true,
+        listeners: {}
+      };
+
+      if (label) label.textContent = `${cap} (Combined)`;
+
+      // Play directly — combined MP4 supports full seeking
+      video.src = combinedChunk.downloadUrl;
+      video.load();
+      video.onloadeddata = () => {
+        box.classList.remove('loading');
+        video.play().catch(e => console.warn(`[MVP][${deviceType}] Autoplay blocked:`, e.message));
+      };
+      video.onerror = async () => {
+        box.classList.remove('loading');
+        console.error(`[MVP][${deviceType}] Combined video failed to load — offering alternatives`);
+        if (label) label.textContent = `${cap} (Playback error)`;
+
+        // Fetch raw chunks so Download & Play has data to work with
+        const device = mvState.devices[deviceType];
+        try {
+          const rawResp = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(sessionId)}&deviceType=${encodeURIComponent(deviceType)}`);
+          const rawData = await rawResp.json();
+          if (rawData.success && rawData.chunks && !rawData.hasCombinedVideo && device) {
+            device.chunks = rawData.chunks;
+            device.needsCompile = true;
+            device.isCombined = false;
+          }
+        } catch (e) { console.warn('Could not fetch raw chunks:', e); }
+
+        const hasRawChunks = device && device.chunks && device.chunks.length > 0 && !device.isCombined;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'mv-compile-overlay';
+        overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);z-index:5;color:white;text-align:center;padding:20px;';
+        overlay.innerHTML = `
+          <div style="font-size:36px;margin-bottom:12px;">⚠️</div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:8px;">Combined video failed to play</div>
+          <div style="font-size:12px;color:#aaa;margin-bottom:12px;">The compiled video may be corrupted.</div>
+          ${hasRawChunks ? `<button onclick="mvDownloadAndPlay('${deviceType}', this)" style="background:#2196f3;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;margin-bottom:8px;">Download & Play (${device.chunks.length} chunks)</button>
+          <div style="font-size:11px;color:#888;margin-bottom:10px;">Instant — combines chunks in browser</div>` : ''}
+          <button onclick="mvForceRecompile('${sessionId}', this)" style="background:#ff9800;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;">Recompile (force)</button>
+          <div style="font-size:11px;color:#888;margin-top:4px;">Slower — creates seekable MP4 on server</div>
+        `;
+        box.appendChild(overlay);
+      };
+      console.log(`[MVP][${deviceType}] Playing combined video directly`);
+      return;
+    }
+
+    // Raw chunks only — don't try to play them (crashes).
+    // Show a message and offer compilation.
     mvState.devices[deviceType] = {
       video: video,
       chunks: data.chunks,
       currentIdx: 0,
       startTime: data.createdTime ? new Date(data.createdTime).getTime() : null,
-      isCombined: data.hasCombinedVideo,
+      isCombined: false,
+      needsCompile: true,
       listeners: {}
     };
 
-    // Update label
-    const chunkLabel = data.hasCombinedVideo ? 'Combined' : `${data.chunks.length} chunks`;
-    if (label) label.textContent = `${cap} (${chunkLabel})`;
-
-    // Load first chunk
-    await mvLoadChunk(deviceType, 0);
-
     box.classList.remove('loading');
-    console.log(`[MVP][${deviceType}] Ready`);
+    const chunkCount = data.chunks.length;
+    if (label) label.textContent = `${cap} (${chunkCount} chunks — needs compilation)`;
+
+    // Show overlay message instead of trying to play raw chunks
+    const overlay = document.createElement('div');
+    overlay.className = 'mv-compile-overlay';
+    overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);z-index:5;color:white;text-align:center;padding:20px;';
+    overlay.innerHTML = `
+      <div style="font-size:36px;margin-bottom:12px;">🎬</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px;">${chunkCount} raw chunks found</div>
+      <div style="font-size:12px;color:#aaa;margin-bottom:12px;">Needs compilation for seekable playback</div>
+      <button onclick="mvTriggerCompile('${sessionId}', this)" style="background:#ff9800;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;margin-bottom:8px;">Compile Now (server)</button>
+      <button onclick="mvDownloadAndPlay('${deviceType}', this)" style="background:#2196f3;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;">Download &amp; Play</button>
+    `;
+    box.appendChild(overlay);
+    console.log(`[MVP][${deviceType}] Raw chunks — showing compile prompt`);
 
   } catch (err) {
     console.error(`[MVP][${deviceType}] Init error:`, err);
     box.classList.remove('loading');
     if (label) label.textContent = `${cap} (Error)`;
+  }
+}
+
+// Trigger compilation from multi-view player
+async function mvTriggerCompile(sessionId, button) {
+  button.disabled = true;
+  button.textContent = 'Compiling...';
+  button.style.background = '#6c757d';
+
+  try {
+    const response = await fetch('/api/compile-recording', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, force: false }),
+    });
+    const result = await response.json();
+
+    if (!result.success) throw new Error(result.message);
+
+    if (result.status === 'done') {
+      button.textContent = 'Done! Reopening...';
+      button.style.background = '#4caf50';
+      // Reopen the multi-view to pick up compiled videos
+      setTimeout(() => {
+        const email = document.getElementById('multiViewTitle').textContent.replace('Multi-View: ', '');
+        closeMultiView();
+        openMultiView(sessionId, email);
+      }, 1500);
+      return;
+    }
+
+    // Poll for completion with timeout
+    button.textContent = 'Compiling... (this may take a few minutes)';
+    const mvPollStart = Date.now();
+    let mvNotStartedCount = 0;
+    const pollId = setInterval(async () => {
+      try {
+        const elapsed = Date.now() - mvPollStart;
+
+        if (elapsed > COMPILE_POLL_TIMEOUT_MS) {
+          clearInterval(pollId);
+          console.warn(`[MVP] Compile poll timeout after ${_fmtElapsed(elapsed)}`);
+          button.textContent = 'Timed out — try Download & Play';
+          button.style.background = '#f44336';
+          button.disabled = false;
+          button.onclick = () => mvTriggerCompile(sessionId, button);
+          return;
+        }
+
+        const statusResp = await fetch(`/api/compile-status?sessionId=${encodeURIComponent(sessionId)}`);
+        const statusData = await statusResp.json();
+
+        if (statusData.status === 'not_started') {
+          mvNotStartedCount++;
+          if (mvNotStartedCount >= 3) {
+            clearInterval(pollId);
+            button.textContent = 'Server restarted — retry or Download & Play';
+            button.style.background = '#ff9800';
+            button.disabled = false;
+            button.onclick = () => mvTriggerCompile(sessionId, button);
+            return;
+          }
+          button.textContent = `Waiting for server... (${_fmtElapsed(elapsed)})`;
+          return;
+        }
+        mvNotStartedCount = 0;
+
+        if (statusData.status === 'done') {
+          clearInterval(pollId);
+          button.textContent = 'Done! Reopening...';
+          button.style.background = '#4caf50';
+          setTimeout(() => {
+            const email = document.getElementById('multiViewTitle').textContent.replace('Multi-View: ', '');
+            closeMultiView();
+            openMultiView(sessionId, email);
+          }, 1500);
+        } else if (statusData.status === 'error') {
+          clearInterval(pollId);
+          button.textContent = 'Compilation failed — click to retry';
+          button.style.background = '#f44336';
+          button.disabled = false;
+          button.onclick = () => mvTriggerCompile(sessionId, button);
+        } else {
+          // Show progress with elapsed time
+          const devices = statusData.devices || {};
+          const parts = Object.entries(devices).map(([dt, info]) => {
+            if (info.status === 'compiling') return `${dt}: compiling`;
+            if (info.status === 'done') return `${dt}: done`;
+            if (info.status === 'queued') return `${dt}: queued`;
+            return `${dt}: ${info.status}`;
+          });
+          button.textContent = (parts.join(' | ') || 'Compiling...') + ` (${_fmtElapsed(elapsed)})`;
+        }
+      } catch (e) {
+        console.error('[MVP] Poll error:', e);
+      }
+    }, COMPILE_POLL_INTERVAL_MS);
+  } catch (err) {
+    console.error('[MVP] Compile trigger error:', err);
+    button.textContent = 'Failed — click to retry';
+    button.style.background = '#f44336';
+    button.disabled = false;
+    button.onclick = () => mvTriggerCompile(sessionId, button);
+  }
+}
+
+// Download all raw chunks, concatenate in browser, and play as single video in multi-view
+// Force-recompile from error overlay (uses force=true to delete corrupted combined videos)
+async function mvForceRecompile(sessionId, button) {
+  button.disabled = true;
+  button.textContent = 'Recompiling...';
+  button.style.background = '#6c757d';
+
+  try {
+    const response = await fetch('/api/compile-recording', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, force: true }),
+    });
+    const result = await response.json();
+    if (!result.success) throw new Error(result.message);
+
+    if (result.status === 'done') {
+      button.textContent = 'Done! Reopening...';
+      button.style.background = '#4caf50';
+      setTimeout(() => {
+        const email = document.getElementById('multiViewTitle').textContent.replace('Multi-View: ', '');
+        closeMultiView();
+        openMultiView(sessionId, email);
+      }, 1500);
+      return;
+    }
+
+    button.textContent = 'Recompiling... (may take several minutes)';
+    const frPollStart = Date.now();
+    let frNotStartedCount = 0;
+    const pollId = setInterval(async () => {
+      try {
+        const elapsed = Date.now() - frPollStart;
+
+        if (elapsed > COMPILE_POLL_TIMEOUT_MS) {
+          clearInterval(pollId);
+          console.warn(`[MVP] Force-recompile poll timeout after ${_fmtElapsed(elapsed)}`);
+          button.textContent = 'Timed out — try Download & Play';
+          button.style.background = '#f44336';
+          button.disabled = false;
+          button.onclick = () => mvForceRecompile(sessionId, button);
+          return;
+        }
+
+        const sr = await fetch('/api/compile-status?sessionId=' + encodeURIComponent(sessionId));
+        const sd = await sr.json();
+
+        if (sd.status === 'not_started') {
+          frNotStartedCount++;
+          if (frNotStartedCount >= 3) {
+            clearInterval(pollId);
+            button.textContent = 'Server restarted — retry or Download & Play';
+            button.style.background = '#ff9800';
+            button.disabled = false;
+            button.onclick = () => mvForceRecompile(sessionId, button);
+            return;
+          }
+          button.textContent = `Waiting for server... (${_fmtElapsed(elapsed)})`;
+          return;
+        }
+        frNotStartedCount = 0;
+
+        if (sd.status === 'done') {
+          clearInterval(pollId);
+          button.textContent = 'Done! Reopening...';
+          button.style.background = '#4caf50';
+          setTimeout(() => {
+            const email = document.getElementById('multiViewTitle').textContent.replace('Multi-View: ', '');
+            closeMultiView();
+            openMultiView(sessionId, email);
+          }, 1500);
+        } else if (sd.status === 'error') {
+          clearInterval(pollId);
+          button.textContent = 'Failed — click to retry';
+          button.style.background = '#f44336';
+          button.disabled = false;
+          button.onclick = () => mvForceRecompile(sessionId, button);
+        } else {
+          // Show per-device progress with elapsed
+          const devices = sd.devices || {};
+          const parts = Object.entries(devices).map(([dt, info]) => `${dt}: ${info.status}`);
+          button.textContent = (parts.length ? parts.join(' | ') : 'Recompiling...') + ` (${_fmtElapsed(elapsed)})`;
+        }
+      } catch (e) { console.error('[MVP] Poll error:', e); }
+    }, COMPILE_POLL_INTERVAL_MS);
+  } catch (err) {
+    button.textContent = 'Failed — click to retry';
+    button.style.background = '#f44336';
+    button.disabled = false;
+    button.onclick = () => mvForceRecompile(sessionId, button);
+  }
+}
+
+// Download all raw chunks, concatenate in browser, and play as single video in multi-view
+async function mvDownloadAndPlay(deviceType, button) {
+  const cap = deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
+  const box = document.getElementById(`mv${cap}`);
+  const device = mvState.devices[deviceType];
+  if (!device) return;
+
+  const label = box.querySelector('.mv-label');
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Fetching chunks...';
+    button.style.background = '#6c757d';
+  }
+
+  try {
+    // If current chunks are combined (or only 1 entry), re-fetch raw chunks from API
+    let chunks = device.chunks;
+    if (!chunks || chunks.length === 0 || (chunks.length === 1 && chunks[0].isCombined)) {
+      console.log(`[MVP][${deviceType}] Re-fetching raw chunks (current data is combined)`);
+      const resp = await fetch(`/api/session-chunks?sessionId=${encodeURIComponent(mvState.sessionId)}&deviceType=${encodeURIComponent(deviceType)}&raw=true`);
+      const data = await resp.json();
+      if (!data.success || !data.chunks || data.chunks.length === 0) {
+        throw new Error('No raw chunks found');
+      }
+      chunks = data.chunks;
+      device.chunks = chunks;
+      console.log(`[MVP][${deviceType}] Got ${chunks.length} raw chunks`);
+    }
+    const blobs = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const response = await fetch(chunks[i].downloadUrl);
+      if (!response.ok) throw new Error(`Chunk ${i + 1} failed (${response.status})`);
+      blobs.push(await response.blob());
+      if (button) button.textContent = `Downloading ${i + 1}/${chunks.length}...`;
+    }
+
+    const fullBlob = new Blob(blobs, { type: 'video/webm' });
+    const url = URL.createObjectURL(fullBlob);
+
+    // Remove the compile overlay
+    const overlay = box.querySelector('.mv-compile-overlay');
+    if (overlay) overlay.remove();
+
+    // Mark as playing
+    device.needsCompile = false;
+    device.isCombined = true; // Treat the concatenated blob like a combined video
+
+    if (label) label.textContent = `${cap} (combined in browser)`;
+
+    // Play the concatenated blob
+    const video = device.video;
+    video.src = url;
+    video.load();
+    video.onloadeddata = () => {
+      box.classList.remove('loading');
+      video.play().catch(e => console.warn(`[MVP][${deviceType}] Autoplay blocked:`, e.message));
+    };
+
+    console.log(`[MVP][${deviceType}] Concatenated ${blobs.length} chunks into ${(fullBlob.size / 1024 / 1024).toFixed(1)}MB blob`);
+  } catch (error) {
+    console.error(`[MVP][${deviceType}] Download & play error:`, error);
+    if (button) {
+      button.textContent = 'Failed — retry';
+      button.style.background = '#f44336';
+      button.disabled = false;
+    }
+    if (label) label.textContent = `${cap} (download failed)`;
   }
 }
 
@@ -1305,33 +1946,265 @@ function closeMultiView() {
     if (device.video) {
       device.video.pause();
       device.video.src = '';
+      device.video.onloadeddata = null;
+      device.video.onerror = null;
     }
   }
+
+  // Remove any compilation overlays
+  document.querySelectorAll('.mv-compile-overlay').forEach(el => el.remove());
 
   mvState.devices = {};
 }
 
-// Time display update
-setInterval(() => {
-  if (!mvState.isActive) return;
+// ====================
+// UNIFIED TIMELINE & CONTROLS
+// ====================
+
+function _fmtTime(secs) {
+  if (!isFinite(secs) || isNaN(secs)) return '--:--';
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// Get the total duration of the spotlighted device's video
+function _mvTotalDuration() {
+  const device = mvState.devices[mvState.spotlight];
+  if (!device || !device.video) return 0;
+  const d = device.video.duration;
+  return isFinite(d) ? d : 0;
+}
+
+// Toggle play/pause for all videos
+function mvTogglePlayPause() {
+  const device = mvState.devices[mvState.spotlight];
+  if (!device || !device.video) return;
+
+  if (device.video.paused) {
+    playAllVideos();
+    document.getElementById('mvPlayPauseBtn').textContent = '⏸';
+  } else {
+    pauseAllVideos();
+    document.getElementById('mvPlayPauseBtn').textContent = '▶';
+  }
+}
+
+// Set playback speed for all videos
+function mvSetSpeed(speed) {
+  const rate = parseFloat(speed);
+  for (const device of Object.values(mvState.devices)) {
+    if (device.video) device.video.playbackRate = rate;
+  }
+  console.log(`[MVP] Playback speed set to ${rate}x`);
+}
+
+// Seek from click on timeline bar
+function mvSeekFromClick(event) {
+  const timeline = document.getElementById('mvTimeline');
+  const rect = timeline.getBoundingClientRect();
+  const pct = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
 
   const device = mvState.devices[mvState.spotlight];
-  if (!device || !device.video || isNaN(device.video.currentTime)) return;
+  if (!device || !device.video) return;
 
-  const t = device.video.currentTime;
-  const mins = Math.floor(t / 60);
-  const secs = Math.floor(t % 60);
+  const total = _mvTotalDuration();
+  if (total <= 0) return;
 
-  let display = `${mins}:${secs.toString().padStart(2, '0')}`;
+  const targetTime = pct * total;
+  device.video.currentTime = targetTime;
 
-  if (device.chunks && device.chunks.length > 1) {
-    display += ` [${device.currentIdx + 1}/${device.chunks.length}]`;
+  // Sync other devices to the new position
+  _mvContinuousSync(targetTime);
+
+  console.log(`[MVP] Seeked to ${_fmtTime(targetTime)} (${Math.round(pct * 100)}%)`);
+}
+
+// Show tooltip on timeline hover
+function mvShowTooltip(event) {
+  const timeline = document.getElementById('mvTimeline');
+  const tooltip = document.getElementById('mvTooltip');
+  const rect = timeline.getBoundingClientRect();
+  const pct = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+
+  const total = _mvTotalDuration();
+  if (total <= 0) { tooltip.style.display = 'none'; return; }
+
+  const hoverTime = pct * total;
+  tooltip.textContent = _fmtTime(hoverTime);
+  tooltip.style.left = `${pct * 100}%`;
+  tooltip.style.display = 'block';
+}
+
+function mvHideTooltip() {
+  document.getElementById('mvTooltip').style.display = 'none';
+}
+
+// Render chunk boundary markers on the timeline
+function _mvRenderChunkMarkers(deviceType) {
+  const device = mvState.devices[deviceType];
+  const container = document.getElementById('mvChunkMarkers');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (!device || !device.chunks || device.chunks.length <= 1) return;
+
+  // For combined video, no chunk markers needed
+  if (device.isCombined) return;
+
+  // Estimate chunk boundaries (30s each)
+  const total = _mvTotalDuration();
+  if (total <= 0) return;
+
+  const estChunkDur = 30; // seconds
+  const numChunks = device.chunks.length;
+  for (let i = 1; i < numChunks; i++) {
+    const pct = Math.min(100, (i * estChunkDur / total) * 100);
+    const marker = document.createElement('div');
+    marker.style.cssText = `position:absolute;left:${pct}%;top:0;width:1px;height:100%;background:rgba(255,255,255,0.2);`;
+    container.appendChild(marker);
+  }
+}
+
+// Continuous sync — keep slave devices aligned with the master
+function _mvContinuousSync(masterTime) {
+  const refDevice = mvState.devices[mvState.spotlight];
+  if (!refDevice) return;
+
+  const refStart = refDevice.startTime;
+  const time = masterTime !== undefined ? masterTime : (refDevice.video ? refDevice.video.currentTime : 0);
+
+  for (const [dt, device] of Object.entries(mvState.devices)) {
+    if (dt === mvState.spotlight || !device.video || device.needsCompile) continue;
+
+    let targetTime;
+    if (refStart && device.startTime) {
+      const offsetSec = (device.startTime - refStart) / 1000;
+      targetTime = time - offsetSec;
+    } else {
+      targetTime = time;
+    }
+
+    if (targetTime < 0) {
+      if (!device.video.paused) device.video.pause();
+      continue;
+    }
+
+    // Only correct if drift > 0.5s to avoid constant micro-seeks
+    const drift = Math.abs(device.video.currentTime - targetTime);
+    if (drift > 0.5) {
+      device.video.currentTime = targetTime;
+    }
+
+    // Match play state
+    if (!refDevice.video.paused && device.video.paused && targetTime >= 0) {
+      device.video.play().catch(() => {});
+    } else if (refDevice.video.paused && !device.video.paused) {
+      device.video.pause();
+    }
+  }
+}
+
+// Main update loop — timeline, time display, per-device bars, continuous sync
+let _mvUpdateRAF = null;
+function _mvUpdateLoop() {
+  if (!mvState.isActive) { _mvUpdateRAF = null; return; }
+
+  const device = mvState.devices[mvState.spotlight];
+  if (device && device.video && !isNaN(device.video.currentTime)) {
+    const t = device.video.currentTime;
+    const total = _mvTotalDuration();
+    const pct = total > 0 ? (t / total) * 100 : 0;
+
+    // Update progress fill and playhead
+    const fill = document.getElementById('mvProgressFill');
+    const head = document.getElementById('mvPlayhead');
+    if (fill) fill.style.width = `${pct}%`;
+    if (head) head.style.left = `${pct}%`;
+
+    // Update time display
+    const timeEl = document.getElementById('mvTimeDisplay');
+    if (timeEl) timeEl.textContent = `${_fmtTime(t)} / ${_fmtTime(total)}`;
+
+    // Update play/pause button state
+    const ppBtn = document.getElementById('mvPlayPauseBtn');
+    if (ppBtn) ppBtn.textContent = device.video.paused ? '▶' : '⏸';
+
+    // Continuous sync every frame
+    _mvContinuousSync();
   }
 
-  document.getElementById('mvTimeDisplay').textContent = display;
-}, 500);
+  // Update per-device progress bars
+  for (const [dt, dev] of Object.entries(mvState.devices)) {
+    if (!dev.video || dev.needsCompile) continue;
+    const bar = document.getElementById(`mvBar${dt.charAt(0).toUpperCase() + dt.slice(1)}`);
+    if (bar) {
+      const d = dev.video.duration;
+      const pct = (isFinite(d) && d > 0) ? (dev.video.currentTime / d) * 100 : 0;
+      bar.style.width = `${pct}%`;
+    }
+  }
+
+  _mvUpdateRAF = requestAnimationFrame(_mvUpdateLoop);
+}
+
+// Start the update loop when multi-view opens
+const _origOpenMultiView = openMultiView;
+openMultiView = async function(sessionId, email) {
+  await _origOpenMultiView(sessionId, email);
+
+  // Start update loop
+  if (_mvUpdateRAF) cancelAnimationFrame(_mvUpdateRAF);
+  _mvUpdateRAF = requestAnimationFrame(_mvUpdateLoop);
+
+  // Render chunk markers for the spotlighted device
+  setTimeout(() => _mvRenderChunkMarkers(mvState.spotlight), 2000);
+
+  // Add keyboard shortcuts
+  document.addEventListener('keydown', _mvKeyHandler);
+};
+
+// Stop the update loop when multi-view closes
+const _origCloseMultiView = closeMultiView;
+closeMultiView = function() {
+  if (_mvUpdateRAF) { cancelAnimationFrame(_mvUpdateRAF); _mvUpdateRAF = null; }
+  document.removeEventListener('keydown', _mvKeyHandler);
+  _origCloseMultiView();
+};
+
+// Keyboard shortcuts for the multi-view player
+function _mvKeyHandler(e) {
+  if (!mvState.isActive) return;
+  const device = mvState.devices[mvState.spotlight];
+  if (!device || !device.video) return;
+
+  switch (e.key) {
+    case ' ':
+      e.preventDefault();
+      mvTogglePlayPause();
+      break;
+    case 'ArrowLeft':
+      e.preventDefault();
+      device.video.currentTime = Math.max(0, device.video.currentTime - (e.shiftKey ? 30 : 5));
+      _mvContinuousSync();
+      break;
+    case 'ArrowRight':
+      e.preventDefault();
+      device.video.currentTime = Math.min(device.video.duration || 0, device.video.currentTime + (e.shiftKey ? 30 : 5));
+      _mvContinuousSync();
+      break;
+  }
+}
 
 // Verification log at end of script
-console.log('[Admin] Script fully loaded');
+console.log(`[Admin] Script v${ADMIN_JS_VERSION} fully loaded`);
 console.log('[Admin] switchTab function exists?', typeof switchTab !== 'undefined');
 console.log('[Admin] window.switchTab exists?', typeof window.switchTab !== 'undefined');
+
+// Check server version matches client version
+fetch('/api/version').then(r => r.json()).then(v => {
+  console.log(`[Admin] Server version: ${v.version} (${v.build})`);
+  if (v.version !== ADMIN_JS_VERSION) {
+    console.warn(`[Admin] VERSION MISMATCH! Client: ${ADMIN_JS_VERSION}, Server: ${v.version}. Hard refresh (Ctrl+Shift+R) recommended.`);
+  }
+}).catch(() => {});
