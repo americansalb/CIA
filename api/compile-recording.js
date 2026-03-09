@@ -56,11 +56,6 @@ function cleanupStaleTempFiles() {
 cleanupStaleTempFiles();
 setInterval(cleanupStaleTempFiles, 30 * 60 * 1000);
 
-// Timeout scales with chunk count: 30s per chunk + 2 minute buffer, minimum 5 minutes, max 15 minutes
-function getCompileTimeout(chunkCount) {
-  return Math.min(15 * 60 * 1000, Math.max(5 * 60 * 1000, (chunkCount * 30 * 1000) + (2 * 60 * 1000)));
-}
-
 async function processQueue() {
   if (compileRunning || compileQueue.length === 0) return;
   compileRunning = true;
@@ -76,19 +71,6 @@ async function processQueue() {
     status.devices[deviceType].progress = { phase: 'starting', current: 0, total: chunks.length };
   }
 
-  // Safety timeout scales with chunk count to prevent killing long compilations
-  const timeoutMs = getCompileTimeout(chunks.length);
-  console.log(`[compile] Timeout set to ${(timeoutMs / 60000).toFixed(0)} minutes for ${chunks.length} chunks`);
-  const timeoutId = setTimeout(() => {
-    console.error(`[compile] TIMEOUT ${sessionId}/${deviceType} after ${(timeoutMs / 1000).toFixed(0)}s — forcing queue advance`);
-    if (status) {
-      status.devices[deviceType].status = 'error';
-      status.devices[deviceType].error = `Compilation timed out after ${(timeoutMs / 60000).toFixed(0)} minutes`;
-    }
-    compileRunning = false;
-    processQueue();
-  }, timeoutMs);
-
   // Progress callback — updates status map in real-time
   const onProgress = ({ phase, current, total, detail }) => {
     if (status && status.devices[deviceType]) {
@@ -98,7 +80,6 @@ async function processQueue() {
 
   try {
     const result = await combineChunkFiles(chunks, folderId, deviceType, email, studentId, onProgress);
-    clearTimeout(timeoutId);
     if (status) {
       if (result.success) {
         status.devices[deviceType].status = 'done';

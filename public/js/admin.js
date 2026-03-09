@@ -922,15 +922,6 @@ async function singleViewCompile(sessionId, button) {
       try {
         const elapsed = Date.now() - svPollStart;
 
-        if (elapsed > COMPILE_POLL_TIMEOUT_MS) {
-          clearInterval(pollId);
-          button.textContent = 'Timed out — try Download & Play instead';
-          button.style.background = '#f44336';
-          button.disabled = false;
-          button.onclick = () => singleViewCompile(sessionId, button);
-          return;
-        }
-
         const statusResp = await fetch(`/api/compile-status?sessionId=${encodeURIComponent(sessionId)}`);
         const statusData = await statusResp.json();
 
@@ -1504,8 +1495,6 @@ window.switchTab = switchTab;
 // COMPILE RECORDING
 // ====================
 
-// Client-side poll timeout: match server max (15 min for large recordings)
-const COMPILE_POLL_TIMEOUT_MS = 15 * 60 * 1000;
 const COMPILE_POLL_INTERVAL_MS = 5000;
 
 function _fmtElapsed(ms) {
@@ -1549,17 +1538,6 @@ async function compileRecording(sessionId, button, force) {
     const pollInterval = setInterval(async () => {
       try {
         const elapsed = Date.now() - pollStarted;
-
-        // Client-side timeout: give up polling after 5 minutes
-        if (elapsed > COMPILE_POLL_TIMEOUT_MS) {
-          clearInterval(pollInterval);
-          console.warn(`[Compile] Poll timeout after ${_fmtElapsed(elapsed)}`);
-          button.textContent = 'Timed out — click to retry';
-          button.style.background = '#f44336';
-          button.disabled = false;
-          button.onclick = () => compileRecording(sessionId, button, force);
-          return;
-        }
 
         const statusResp = await fetch(`/api/compile-status?sessionId=${encodeURIComponent(sessionId)}`);
         const statusResult = await statusResp.json();
@@ -1913,16 +1891,6 @@ async function mvTriggerCompile(sessionId, button) {
       try {
         const elapsed = Date.now() - mvPollStart;
 
-        if (elapsed > COMPILE_POLL_TIMEOUT_MS) {
-          clearInterval(pollId);
-          console.warn(`[MVP] Compile poll timeout after ${_fmtElapsed(elapsed)}`);
-          button.textContent = 'Timed out — try Download & Play';
-          button.style.background = '#f44336';
-          button.disabled = false;
-          button.onclick = () => mvTriggerCompile(sessionId, button);
-          return;
-        }
-
         const statusResp = await fetch(`/api/compile-status?sessionId=${encodeURIComponent(sessionId)}`);
         const statusData = await statusResp.json();
 
@@ -2004,16 +1972,6 @@ async function mvForceRecompile(sessionId, button) {
     const pollId = setInterval(async () => {
       try {
         const elapsed = Date.now() - frPollStart;
-
-        if (elapsed > COMPILE_POLL_TIMEOUT_MS) {
-          clearInterval(pollId);
-          console.warn(`[MVP] Force-recompile poll timeout after ${_fmtElapsed(elapsed)}`);
-          button.textContent = 'Timed out — try Download & Play';
-          button.style.background = '#f44336';
-          button.disabled = false;
-          button.onclick = () => mvForceRecompile(sessionId, button);
-          return;
-        }
 
         const sr = await fetch('/api/compile-status?sessionId=' + encodeURIComponent(sessionId));
         const sd = await sr.json();
