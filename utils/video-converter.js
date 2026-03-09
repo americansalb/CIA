@@ -341,9 +341,17 @@ function transcodeChunkToTS(inputPath, outputPath, combineId, index, total) {
  *   Pass 1: Transcode each chunk individually to MPEG-TS (low memory per chunk)
  *   Pass 2: Concatenate TS files with stream copy to MP4 (fast, no re-encoding)
  */
-async function combineChunkFiles(chunkList, outputFolderId, deviceType, studentEmail, studentId) {
+async function combineChunkFiles(chunkList, outputFolderId, deviceType, studentEmail, studentId, onProgress) {
   const combineId = `combine_${Date.now()}`;
   console.log(`[${combineId}] Starting two-pass chunk combination for ${deviceType} (${chunkList.length} chunks)`);
+
+  // Progress callback: onProgress({ phase, current, total, detail })
+  const report = (phase, current, total, detail) => {
+    console.log(`[${combineId}] [${phase}] ${current}/${total} ${detail || ''}`);
+    if (onProgress) {
+      try { onProgress({ phase, current, total, detail }); } catch (e) { /* ignore */ }
+    }
+  };
 
   const workDir = path.join(TEMP_DIR, combineId);
   fs.mkdirSync(workDir, { recursive: true });
@@ -368,25 +376,24 @@ async function combineChunkFiles(chunkList, outputFolderId, deviceType, studentE
     });
 
     // Download all chunks
+    report('download', 0, chunkList.length, 'Starting downloads...');
     const dlStart = Date.now();
     for (let i = 0; i < chunkList.length; i++) {
       const chunk = chunkList[i];
       const ext = chunk.name.endsWith('.mp4') ? 'mp4' : 'webm';
       const chunkPath = path.join(workDir, `chunk_${String(i).padStart(4, '0')}.${ext}`);
-      if (i % 10 === 0 || i === chunkList.length - 1) {
-        console.log(`[${combineId}] Downloading chunk ${i + 1}/${chunkList.length}: ${chunk.name}`);
-      }
+      report('download', i + 1, chunkList.length, chunk.name);
       await downloadFile(chunk.id, chunkPath);
       localFiles.push(chunkPath);
     }
     console.log(`[${combineId}] All ${chunkList.length} chunks downloaded in ${((Date.now() - dlStart) / 1000).toFixed(1)}s`);
 
     // PASS 1: Transcode each chunk individually to MPEG-TS
-    // This keeps memory low because only one chunk is being processed at a time
-    console.log(`[${combineId}] Pass 1: Transcoding each chunk to MPEG-TS...`);
+    report('transcode', 0, localFiles.length, 'Starting transcoding...');
     const pass1Start = Date.now();
     for (let i = 0; i < localFiles.length; i++) {
       const tsPath = path.join(workDir, `chunk_${String(i).padStart(4, '0')}.ts`);
+      report('transcode', i + 1, localFiles.length);
       await transcodeChunkToTS(localFiles[i], tsPath, combineId, i, localFiles.length);
       tsFiles.push(tsPath);
 
@@ -396,6 +403,7 @@ async function combineChunkFiles(chunkList, outputFolderId, deviceType, studentE
     console.log(`[${combineId}] Pass 1 done in ${((Date.now() - pass1Start) / 1000).toFixed(1)}s`);
 
     // PASS 2: Concatenate TS files with stream copy (fast, no re-encoding, low memory)
+    report('concat', 0, 1, 'Concatenating...');
     const concatListPath = path.join(workDir, 'concat_list.txt');
     const concatContent = tsFiles.map(f => `file '${f}'`).join('\n');
     fs.writeFileSync(concatListPath, concatContent);
@@ -424,13 +432,16 @@ async function combineChunkFiles(chunkList, outputFolderId, deviceType, studentE
         })
         .run();
     });
+    report('concat', 1, 1, 'Done');
 
     // Upload combined MP4
+    report('upload', 0, 1, 'Uploading combined video...');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const outFileName = `${studentEmail}_${studentId}_COMBINED_${deviceType}_${timestamp}.mp4`;
     console.log(`[${combineId}] Uploading combined video (${outFileName})...`);
     const uploadResult = await uploadFile(outputPath, outFileName, outputFolderId, 'video/mp4');
     console.log(`[${combineId}] Combined video uploaded: ${uploadResult.fileId}`);
+    report('upload', 1, 1, 'Done');
 
     // Cleanup
     try { fs.rmSync(workDir, { recursive: true, force: true }); } catch (e) { /* ignore */ }

@@ -946,6 +946,31 @@ async function forcePlayRawChunks() {
 }
 
 // Trigger compilation from single-view player
+// Format compile progress from status data into a human-readable string
+function _formatCompileProgress(statusData) {
+  const devices = statusData.devices || {};
+  const parts = [];
+  for (const [dt, info] of Object.entries(devices)) {
+    if (info.status === 'done' || info.status === 'skipped') continue;
+    if (info.status === 'compiling' && info.progress) {
+      const p = info.progress;
+      const phaseLabel = { download: 'Downloading', transcode: 'Transcoding', concat: 'Combining', upload: 'Uploading' }[p.phase] || p.phase;
+      if (p.total > 1) {
+        parts.push(`${dt}: ${phaseLabel} ${p.current}/${p.total}`);
+      } else {
+        parts.push(`${dt}: ${phaseLabel}...`);
+      }
+    } else if (info.status === 'queued') {
+      parts.push(`${dt}: queued (${info.chunks} chunks)`);
+    } else if (info.status === 'error') {
+      parts.push(`${dt}: failed`);
+    } else {
+      parts.push(`${dt}: ${info.status}`);
+    }
+  }
+  return parts.join(' | ') || 'Compiling...';
+}
+
 async function singleViewCompile(sessionId, button) {
   button.disabled = true;
   button.textContent = 'Starting compilation...';
@@ -967,11 +992,39 @@ async function singleViewCompile(sessionId, button) {
       return;
     }
 
-    button.textContent = 'Compiling... (this may take a few minutes)';
+    button.textContent = 'Compiling...';
+    const svPollStart = Date.now();
+    let svNotStartedCount = 0;
     const pollId = setInterval(async () => {
       try {
+        const elapsed = Date.now() - svPollStart;
+
+        if (elapsed > COMPILE_POLL_TIMEOUT_MS) {
+          clearInterval(pollId);
+          button.textContent = 'Timed out — try Download & Play instead';
+          button.style.background = '#f44336';
+          button.disabled = false;
+          button.onclick = () => singleViewCompile(sessionId, button);
+          return;
+        }
+
         const statusResp = await fetch(`/api/compile-status?sessionId=${encodeURIComponent(sessionId)}`);
         const statusData = await statusResp.json();
+
+        if (statusData.status === 'not_started') {
+          svNotStartedCount++;
+          if (svNotStartedCount >= 3) {
+            clearInterval(pollId);
+            button.textContent = 'Server restarted — click to retry';
+            button.style.background = '#ff9800';
+            button.disabled = false;
+            button.onclick = () => singleViewCompile(sessionId, button);
+            return;
+          }
+          return;
+        }
+        svNotStartedCount = 0;
+
         if (statusData.status === 'done') {
           clearInterval(pollId);
           button.textContent = 'Done! Reloading...';
@@ -979,16 +1032,22 @@ async function singleViewCompile(sessionId, button) {
           setTimeout(() => openVideoPlayer(sessionId, currentDevice, document.getElementById('videoPlayerTitle').textContent.split(' - ')[0]), 1500);
         } else if (statusData.status === 'error') {
           clearInterval(pollId);
-          button.textContent = 'Compilation failed — click to retry';
+          const errDevices = Object.entries(statusData.devices || {}).filter(([,d]) => d.status === 'error').map(([dt,d]) => `${dt}: ${d.error}`);
+          button.textContent = 'Failed — click to retry';
+          button.title = errDevices.join('; ') || 'Unknown error';
           button.style.background = '#f44336';
           button.disabled = false;
+          button.onclick = () => singleViewCompile(sessionId, button);
+        } else {
+          button.textContent = _formatCompileProgress(statusData) + ` (${_fmtElapsed(elapsed)})`;
         }
       } catch (e) { console.error('Poll error:', e); }
-    }, 5000);
+    }, COMPILE_POLL_INTERVAL_MS);
   } catch (err) {
     button.textContent = 'Failed — click to retry';
     button.style.background = '#f44336';
     button.disabled = false;
+    button.onclick = () => singleViewCompile(sessionId, button);
   }
 }
 
@@ -1614,17 +1673,8 @@ async function compileRecording(sessionId, button, force) {
         }
         notStartedCount = 0;
 
-        // Update button with progress + elapsed time
-        const devices = statusResult.devices || {};
-        const parts = [];
-        for (const [dt, info] of Object.entries(devices)) {
-          if (info.status === 'compiling') parts.push(`${dt}: compiling ${info.chunks} chunks`);
-          else if (info.status === 'queued') parts.push(`${dt}: queued (${info.chunks})`);
-          else if (info.status === 'done') parts.push(`${dt}: done`);
-          else if (info.status === 'error') parts.push(`${dt}: ERROR ${info.error || ''}`);
-        }
-        const progressText = parts.length > 0 ? parts.join(' | ') : 'Compiling...';
-        button.textContent = `${progressText} (${_fmtElapsed(elapsed)})`;
+        // Update button with granular progress + elapsed time
+        button.textContent = `${_formatCompileProgress(statusResult)} (${_fmtElapsed(elapsed)})`;
 
         if (statusResult.status === 'done' || statusResult.status === 'error') {
           clearInterval(pollInterval);
@@ -1970,15 +2020,7 @@ async function mvTriggerCompile(sessionId, button) {
           button.disabled = false;
           button.onclick = () => mvTriggerCompile(sessionId, button);
         } else {
-          // Show progress with elapsed time
-          const devices = statusData.devices || {};
-          const parts = Object.entries(devices).map(([dt, info]) => {
-            if (info.status === 'compiling') return `${dt}: compiling`;
-            if (info.status === 'done') return `${dt}: done`;
-            if (info.status === 'queued') return `${dt}: queued`;
-            return `${dt}: ${info.status}`;
-          });
-          button.textContent = (parts.join(' | ') || 'Compiling...') + ` (${_fmtElapsed(elapsed)})`;
+          button.textContent = _formatCompileProgress(statusData) + ` (${_fmtElapsed(elapsed)})`;
         }
       } catch (e) {
         console.error('[MVP] Poll error:', e);
@@ -2070,10 +2112,7 @@ async function mvForceRecompile(sessionId, button) {
           button.disabled = false;
           button.onclick = () => mvForceRecompile(sessionId, button);
         } else {
-          // Show per-device progress with elapsed
-          const devices = sd.devices || {};
-          const parts = Object.entries(devices).map(([dt, info]) => `${dt}: ${info.status}`);
-          button.textContent = (parts.length ? parts.join(' | ') : 'Recompiling...') + ` (${_fmtElapsed(elapsed)})`;
+          button.textContent = _formatCompileProgress(sd) + ` (${_fmtElapsed(elapsed)})`;
         }
       } catch (e) { console.error('[MVP] Poll error:', e); }
     }, COMPILE_POLL_INTERVAL_MS);
