@@ -860,6 +860,7 @@
         <div class="video-display">
           <div class="video-wrapper">
             <video id="chunkVideo" controls autoplay></video>
+            <video id="chunkVideoB" controls style="display: none;"></video>
             <div id="videoLoading" class="video-loading" style="display: none;">Loading chunk...</div>
           </div>
           <div class="video-controls">
@@ -903,18 +904,21 @@
           <!-- Main Camera -->
           <div id="mvMain" class="mv-video-box" onclick="spotlightVideo('main')" style="grid-area: main;">
             <video id="mvMainVideo" controls></video>
+            <video id="mvMainVideoB" controls style="display: none;"></video>
             <div class="mv-label" style="background: #667eea;">📹 Main Camera</div>
             <div class="mv-loading">Loading...</div>
           </div>
           <!-- Proctor Camera -->
           <div id="mvProctor" class="mv-video-box" onclick="spotlightVideo('proctor')" style="grid-area: proctor;">
             <video id="mvProctorVideo" controls></video>
+            <video id="mvProctorVideoB" controls style="display: none;"></video>
             <div class="mv-label" style="background: #4caf50;">📱 Proctor Camera</div>
             <div class="mv-loading">Loading...</div>
           </div>
           <!-- Screen Recording -->
           <div id="mvScreen" class="mv-video-box" onclick="spotlightVideo('screen')" style="grid-area: screen;">
             <video id="mvScreenVideo" controls></video>
+            <video id="mvScreenVideoB" controls style="display: none;"></video>
             <div class="mv-label" style="background: #ff9800;">🖥️ Screen</div>
             <div class="mv-loading">Loading...</div>
           </div>

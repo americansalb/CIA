@@ -21,7 +21,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
 }));
 
 // API Routes
-app.get('/api/version', (req, res) => res.json({ version: '2.0.0', build: 'video-player-overhaul' }));
+app.get('/api/version', (req, res) => res.json({ version: '2.1.0', build: 'gapless-playback' }));
 app.get('/api/health', require('./api/health'));
 app.post('/api/validate-student', require('./api/validate-student'));
 app.post('/api/validate-admin', require('./api/validate-admin'));
