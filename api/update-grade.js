@@ -75,6 +75,14 @@ module.exports = async (req, res) => {
       success: true,
       message: 'Grade updated successfully',
     });
+
+    // Mirror the new grade into the Results tab. Deliberately after the
+    // response and deliberately not awaited: the grade is already saved to
+    // Drive, so a spreadsheet hiccup must not fail the grading request. The
+    // sheet can always be rebuilt from Drive with /api/sync-results.
+    require('./sync-results').syncResults().catch((err) => {
+      console.error('[Results] Sheet refresh after grading failed:', err.message);
+    });
   } catch (error) {
     console.error('Update grade error:', error);
     res.status(500).json({

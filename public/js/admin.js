@@ -90,6 +90,45 @@ async function loadRecordings() {
   }
 }
 
+// Write every attempt and its grade into the Results tab of the assessment
+// spreadsheet. Grading already refreshes the tab on its own; this is the manual
+// pull for the attempts recorded before the tab existed, and for anyone who
+// wants to be sure the sheet is current before reading it.
+async function syncResultsToSheet() {
+  const button = document.getElementById('syncResultsBtn');
+  const status = document.getElementById('syncResultsStatus');
+  const originalLabel = button.textContent;
+
+  button.disabled = true;
+  button.textContent = 'Sending...';
+  status.style.display = 'block';
+  status.style.color = '#666';
+  status.textContent = 'Reading every attempt from Drive and writing the spreadsheet. This can take a minute.';
+
+  try {
+    const response = await fetch('/api/sync-results', { method: 'POST' });
+    const result = await response.json();
+
+    if (result.success) {
+      status.style.color = '#0f766e';
+      const link = result.sheetUrl
+        ? ` <a href="${result.sheetUrl}" target="_blank" rel="noopener">Open the spreadsheet</a>`
+        : '';
+      status.innerHTML = `${result.count} attempt${result.count === 1 ? '' : 's'} written to the ${result.sheetName} tab.${link}`;
+    } else {
+      status.style.color = '#c33';
+      status.textContent = result.message || 'Could not write the spreadsheet.';
+    }
+  } catch (error) {
+    console.error('Error syncing results:', error);
+    status.style.color = '#c33';
+    status.textContent = 'Could not reach the server to write the spreadsheet.';
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
+}
+
 // Combine all attempts into unified list and filter
 function filterRecordings() {
   const searchInput = document.getElementById('searchInput');

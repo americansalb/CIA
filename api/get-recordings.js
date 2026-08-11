@@ -47,8 +47,10 @@ function extractTestName(fileName, email, studentId) {
   return 'Unknown';
 }
 
-module.exports = async (req, res) => {
-  try {
+// Walk Drive and build the recording list. Split out from the route handler so
+// the results sheet can be rebuilt from the same source the admin panel reads,
+// rather than a second, drifting copy of this traversal.
+async function collectRecordings() {
     const drive = await getDrive();
     const mainFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
@@ -286,6 +288,13 @@ module.exports = async (req, res) => {
       recordings.push(...batchResults.filter(r => r !== null));
     }
 
+    return recordings;
+}
+
+module.exports = async (req, res) => {
+  try {
+    const recordings = await collectRecordings();
+
     console.log(`[Recordings] Returning ${recordings.length} recordings`);
 
     res.json({
@@ -300,3 +309,5 @@ module.exports = async (req, res) => {
     });
   }
 };
+
+module.exports.collectRecordings = collectRecordings;

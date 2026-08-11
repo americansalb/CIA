@@ -770,8 +770,10 @@
             <option value="oldest">Oldest</option>
           </select>
           <button onclick="loadRecordings()" style="padding: 8px 12px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">Refresh</button>
+          <button id="syncResultsBtn" onclick="syncResultsToSheet()" title="Write every attempt and its grade to the Results tab of the assessment spreadsheet" style="padding: 8px 12px; background: #0f766e; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">Send results to spreadsheet</button>
           <span id="totalCount" style="color: #666; font-size: 13px;">0 attempts</span>
         </div>
+        <div id="syncResultsStatus" style="margin-bottom: 12px; font-size: 13px; color: #666; display: none;"></div>
 
         <!-- Compact Recordings Table -->
         <div id="recordingsContainer" style="background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden;">

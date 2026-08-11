@@ -460,6 +460,114 @@ async function deleteTest(testName) {
   }
 }
 
+const RESULTS_SHEET_NAME = 'Results';
+
+const RESULTS_HEADERS = [
+  'Session_ID',
+  'Email',
+  'Student_ID',
+  'Test',
+  'Status',
+  'Grade_Notes',
+  'Graded_By',
+  'Graded_At',
+  'Submitted_At',
+  'Duration_Seconds',
+  'Interventions',
+  'Repetitions',
+  'Pauses',
+  'Videos',
+  'Recording_Link',
+];
+
+// Grades live in a metadata.json file inside each attempt's Drive folder, one
+// file per attempt. Nothing reads them together, so this flattens every attempt
+// into one row. Interventions are counted by type because "8 interventions"
+// hides whether the candidate asked for repetitions or stopped to research.
+function resultToRow(rec) {
+  const interventions = Array.isArray(rec.interventions) ? rec.interventions : [];
+  const countOfType = (needle) => interventions.filter((i) => {
+    const type = String((i && (i.type || i.kind)) || i || '').toLowerCase();
+    return type.includes(needle);
+  }).length;
+
+  const videos = Array.isArray(rec.videos) ? rec.videos : [];
+  // Any video in the folder shares the folder, so the first link that exists
+  // opens the attempt in Drive.
+  const link = videos.map(v => v.webViewLink).find(Boolean) || '';
+
+  const duration = Number(rec.duration);
+
+  return [
+    rec.sessionId || rec.sessionFolder || '',
+    rec.email || '',
+    rec.studentId || '',
+    rec.permittedTest || '',
+    rec.status || '',
+    rec.notes || '',
+    rec.gradedBy || '',
+    rec.gradedAt || '',
+    rec.uploadedAt || '',
+    Number.isFinite(duration) ? String(duration) : String(rec.duration || ''),
+    String(rec.interventionCount != null ? rec.interventionCount : interventions.length),
+    String(countOfType('repet')),
+    String(countOfType('pause') || countOfType('research')),
+    String(videos.filter(v => v.fileId && v.fileId !== 'chunks').length),
+    link,
+  ];
+}
+
+// Create the Results tab on first run. Every other tab in this workbook is
+// hand-made, so a fresh deployment would otherwise fail on a missing range.
+async function ensureResultsSheet(sheets) {
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    fields: 'sheets.properties.title',
+  });
+
+  const exists = (meta.data.sheets || []).some(
+    s => s.properties && s.properties.title === RESULTS_SHEET_NAME
+  );
+  if (exists) return;
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    resource: {
+      requests: [{ addSheet: { properties: { title: RESULTS_SHEET_NAME } } }],
+    },
+  });
+  console.log(`[Results] Created "${RESULTS_SHEET_NAME}" tab`);
+}
+
+// Rebuild the whole tab from Drive rather than appending or patching rows.
+// Drive is the source of truth for grades, so a full rewrite cannot drift out
+// of step with it, and re-running it is harmless.
+async function writeResults(recordings) {
+  const sheets = await getSheets();
+  await ensureResultsSheet(sheets);
+
+  const rows = [...recordings]
+    .sort((a, b) => new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0))
+    .map(resultToRow);
+
+  // Clear first: a rebuild with fewer attempts than last time would otherwise
+  // leave stale rows stranded below the new data.
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    range: RESULTS_SHEET_NAME,
+  });
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    range: `${RESULTS_SHEET_NAME}!A1`,
+    valueInputOption: 'RAW',
+    resource: { values: [RESULTS_HEADERS, ...rows] },
+  });
+
+  console.log(`[Results] Wrote ${rows.length} attempts to "${RESULTS_SHEET_NAME}"`);
+  return rows.length;
+}
+
 module.exports = {
   getStudentRecord,
   validateAdmin,
@@ -468,4 +576,6 @@ module.exports = {
   saveTestSegments,
   updateTestExternalName,
   deleteTest,
+  writeResults,
+  RESULTS_SHEET_NAME,
 };
